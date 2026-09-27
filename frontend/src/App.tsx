@@ -73,9 +73,11 @@ export default function App() {
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-60 flex-col border-r border-white/10 bg-slate-950/60 p-4">
         <div className="mb-8 flex items-center gap-2 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 font-bold text-white">
-            AI
-          </div>
+          <img
+            src="/logo.png"
+            alt="AI-Bench"
+            className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/10"
+          />
           <div>
             <div className="font-semibold leading-tight text-white">AI-Bench</div>
             <div className="text-[11px] text-slate-500">Local ML/LLM profiler</div>
