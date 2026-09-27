@@ -48,6 +48,12 @@ jobs:
 
       - name: Build installer
         shell: pwsh
+        env:
+          # Optional Authenticode signing. Add these as repository secrets to
+          # produce a signed installer (avoids SmartScreen warnings). When
+          # absent, the build still succeeds and produces an unsigned installer.
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           .\installer\build_installer.ps1 -Version "${{ steps.ver.outputs.version }}"
 
