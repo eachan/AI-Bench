@@ -27,6 +27,72 @@ from .base import BenchmarkRunner, CancelledError, ProgressCallback, RunHandle, 
 _FLOAT_RE = re.compile(r"[-+]?\d*\.?\d+")
 
 
+def discover_stock_configs(home: Optional[str]) -> list[dict[str, Any]]:
+    """Enumerate the MLPerf Client's bundled stock scenario configs.
+
+    These ship next to the binary under ``llm/``, ``agentic/`` and
+    ``image-gen/`` and already contain valid model/data download URLs and all
+    required fields, so they are the reliable way to drive a real benchmark
+    (synthesized configs are rejected by the tool's schema validation).
+    """
+
+    if not home:
+        return []
+    root = Path(home)
+    if not root.exists():
+        return []
+    configs: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*.json")):
+        parts = {p.lower() for p in path.parts}
+        if "logs" in parts or path.name.lower() in {"results.json"}:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        scenarios = data.get("Scenarios")
+        if not isinstance(scenarios, list) or not scenarios:
+            continue
+        sc = scenarios[0]
+        eps = sc.get("ExecutionProviders") or [{}]
+        ep = eps[0] if isinstance(eps, list) and eps else {}
+        rel_top = path.relative_to(root).parts[0] if path.relative_to(root).parts else ""
+        configs.append(
+            {
+                "path": str(path),
+                "name": path.stem,
+                "category": rel_top,
+                "scenario": sc.get("Name", ""),
+                "ep": ep.get("Name", ""),
+                "device": (ep.get("Config") or {}).get("device_type", ""),
+            }
+        )
+    return configs
+
+
+def select_stock_config(configs: list[dict[str, Any]], params: dict[str, Any]) -> Optional[str]:
+    """Pick the stock config that best matches the requested scenario/EP/device."""
+
+    if not configs:
+        return None
+    scenario = str(params.get("scenario", "")).lower()
+    backend = str(params.get("backend", "")).lower()
+    device = str(params.get("device_type", "")).lower()
+
+    def score(c: dict[str, Any]) -> int:
+        s = 0
+        if scenario and scenario in (c["scenario"].lower() + " " + c["name"].lower()):
+            s += 2
+        if backend and backend.replace("-", "") in c["ep"].lower().replace("-", ""):
+            s += 4
+        if device and device == c["device"].lower():
+            s += 3
+        return s
+
+    ranked = sorted(configs, key=score, reverse=True)
+    return ranked[0]["path"] if ranked else None
+
+
 def build_mlperf_config(params: dict[str, Any]) -> dict[str, Any]:
     """Synthesize a minimal MLPerf Client config from UI parameters."""
 
@@ -47,12 +113,18 @@ def build_mlperf_config(params: dict[str, Any]) -> dict[str, Any]:
     if backend == "llama-cpp":
         ep_config.update({"backend": params.get("llama_backend", "CUDA"), "gpu_layers": 999})
 
+    # NOTE: the MLPerf Client schema requires InputFilePath (and typically
+    # AssetsPath); include them so a synthesized config validates. Real runs
+    # should prefer a bundled stock config, which carries valid download URLs.
+    input_files = params.get("input_files") or {"base": [], "extended": []}
     return {
         "SystemConfig": {"Comment": f"AI-Bench generated ({backend})", "TempPath": ""},
         "Scenarios": [
             {
                 "Name": params.get("scenario", "Llama3"),
                 "Models": [model_entry],
+                "InputFilePath": input_files,
+                "AssetsPath": params.get("assets") or [],
                 "Iterations": iterations,
                 "WarmUp": int(params.get("warmup", 1)),
                 "ExecutionProviders": [{"Name": backend, "Config": ep_config}],
@@ -136,21 +208,45 @@ class MLPerfRunner(BenchmarkRunner):
         config.ensure_dirs()
         out = RunOutput()
 
-        # Resolve a config file: an explicit path wins, otherwise synthesize one.
+        # Resolve a config file. Priority: explicit path -> a bundled stock
+        # config matching the requested scenario/EP/device -> synthesized (last
+        # resort). Stock configs are strongly preferred because the tool's
+        # schema validation rejects incomplete configs.
         cfg_path = p.get("config_path")
+        if not cfg_path:
+            stock = discover_stock_configs(config.MLPERF_HOME)
+            cfg_path = select_stock_config(stock, p)
+            if cfg_path:
+                out.logs.append(f"Using stock MLPerf config: {cfg_path}")
         if not cfg_path:
             cfg = build_mlperf_config(p)
             cfg_path = str(config.CONFIGS_DIR / f"mlperf_{handle.run_id}.json")
             Path(cfg_path).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-            out.logs.append(f"Generated MLPerf config at {cfg_path}")
+            out.logs.append(
+                f"No stock config found; generated {cfg_path}. If MLPerf rejects it, "
+                "select a bundled config via the Custom config file setting."
+            )
 
         results_csv = config.RUNS_DIR / f"mlperf_{handle.run_id}.csv"
-        cmd = [self.binary, "-c", str(cfg_path), "-x", str(results_csv), "-p", "false"]
+        data_dir = config.DATASETS_DIR / "mlperf"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        # -p false disables the tool's end-of-run "Press any key" pause (which
+        # would otherwise hang a headless subprocess).
+        cmd = [
+            self.binary,
+            "-c", str(cfg_path),
+            "-x", str(results_csv),
+            "-o", str(config.RUNS_DIR),
+            "-d", str(data_dir),
+            "-p", "false",
+        ]
         out.logs.append("$ " + " ".join(cmd))
         progress("Starting", 0.0, "Launching MLPerf Client")
 
+        # Run from the MLPerf home dir so its execution-provider plugins resolve.
+        cwd = config.MLPERF_HOME if config.MLPERF_HOME else None
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd
         )
         try:
             assert proc.stdout is not None

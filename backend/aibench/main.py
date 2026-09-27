@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, downloads, store
+from . import __version__, config, downloads, store
 from .catalog import get_catalog, get_definition
 from .engine import manager
 from .hardware import detect_hardware, refresh_hardware
@@ -67,6 +67,15 @@ async def benchmark(benchmark_id: str) -> dict:
     if not defn:
         raise HTTPException(status_code=404, detail="Benchmark not found")
     return defn.model_dump()
+
+
+@app.get("/api/mlperf/configs")
+async def mlperf_configs() -> dict:
+    """List the MLPerf Client's bundled stock scenario configs (if installed)."""
+
+    from .runners.mlperf import discover_stock_configs
+
+    return {"home": config.MLPERF_HOME, "configs": discover_stock_configs(config.MLPERF_HOME)}
 
 
 # --------------------------------------------------------------------------- #
