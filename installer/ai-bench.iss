@@ -10,7 +10,7 @@
 
 #define MyAppName "AI-Bench"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "1.0.0"
 #endif
 #define MyAppPublisher "AI-Bench"
 #define MyAppURL "https://github.com/eachan/AI-Bench"

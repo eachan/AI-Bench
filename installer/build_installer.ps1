@@ -15,7 +15,7 @@
     innosetup`). Run from anywhere; paths are resolved relative to the repo.
 
 .PARAMETER Version
-    Version stamped into the installer (default 0.1.0).
+    Version stamped into the installer (default 1.0.0).
 
 .PARAMETER SkipLlamaCpp
     Skip downloading/bundling the llama-bench binary.
@@ -23,7 +23,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = "1.0.0",
     [switch]$SkipLlamaCpp,
     [switch]$SkipMlperf,
     [string]$MlperfReleaseTag = "v2.0.1"
