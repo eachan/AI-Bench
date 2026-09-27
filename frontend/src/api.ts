@@ -85,6 +85,15 @@ export type RunResult = {
   finished_at?: string | null;
 };
 
+export type MlperfConfig = {
+  path: string;
+  name: string;
+  category: string;
+  scenario: string;
+  ep: string;
+  device: string;
+};
+
 export type ProgressEvent = {
   type: "progress" | "log" | "status" | "metric";
   run_id: string;
@@ -106,6 +115,10 @@ export const api = {
   refreshHardware: () =>
     fetch("/api/hardware/refresh", { method: "POST" }).then((r) => j<Hardware>(r)),
   benchmarks: () => fetch("/api/benchmarks").then((r) => j<Benchmark[]>(r)),
+  mlperfConfigs: () =>
+    fetch("/api/mlperf/configs").then((r) =>
+      j<{ home: string | null; configs: MlperfConfig[] }>(r)
+    ),
   runs: () => fetch("/api/runs").then((r) => j<RunResult[]>(r)),
   run: (id: string) => fetch(`/api/runs/${id}`).then((r) => j<RunResult>(r)),
   createRun: (body: { benchmark_id: string; label?: string; params: Record<string, unknown> }) =>
