@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -161,7 +163,30 @@ async def ws(websocket: WebSocket) -> None:
 # --------------------------------------------------------------------------- #
 # Static frontend (served in production / packaged app)
 # --------------------------------------------------------------------------- #
-_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+def _resolve_frontend_dist() -> Path:
+    """Find the built web UI in dev and in a packaged (PyInstaller) app."""
+
+    candidates = []
+    override = os.environ.get("AIBENCH_FRONTEND_DIST")
+    if override:
+        candidates.append(Path(override))
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "frontend" / "dist")
+    exe_dir = Path(sys.executable).resolve().parent
+    candidates += [
+        exe_dir / "frontend" / "dist",
+        exe_dir / "_internal" / "frontend" / "dist",
+    ]
+    # Source checkout layout: backend/aibench/main.py -> repo root.
+    candidates.append(Path(__file__).resolve().parent.parent.parent / "frontend" / "dist")
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[-1]
+
+
+_FRONTEND_DIST = _resolve_frontend_dist()
 if _FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="assets")
 

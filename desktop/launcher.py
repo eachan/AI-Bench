@@ -43,6 +43,12 @@ def _wait_until_up(url: str, timeout: float = 20.0) -> bool:
 
 
 def main() -> None:
+    # Headless / server-only mode: run just the API+UI server (used for testing
+    # the packaged bundle and for advanced/remote usage).
+    if os.environ.get("AIBENCH_SERVER_ONLY") == "1":
+        _serve()
+        return
+
     server = threading.Thread(target=_serve, name="aibench-server", daemon=True)
     server.start()
 
