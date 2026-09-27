@@ -32,7 +32,8 @@ DisableProgramGroupPage=yes
 LicenseFile=license.txt
 OutputDir=Output
 OutputBaseFilename=AI-Bench-Setup
-SetupIconFile=aibench.ico
+; SetupIconFile is intentionally omitted (uses Inno's default wizard icon).
+; Drop an installer\aibench.ico and re-add SetupIconFile=aibench.ico to brand it.
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2
