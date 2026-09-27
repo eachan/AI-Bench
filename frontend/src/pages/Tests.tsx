@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, FileCog, Play, Settings2, StopCircle } from "lucide-react";
-import { api, Benchmark, MlperfConfig, RunResult } from "../api";
+import { Boxes, ChevronDown, FileCog, Play, Settings2, StopCircle } from "lucide-react";
+import { api, Benchmark, LocalModel, MlperfConfig, RunResult } from "../api";
+import { Link } from "react-router-dom";
 import { Card, Empty, ProgressBar, SectionTitle, StatusBadge } from "../components/ui";
 import ParamControl from "../components/ParamControl";
 import { SeriesLineChart } from "../components/charts";
@@ -71,6 +72,12 @@ export default function Tests({
       );
     }
   }
+  if (selected?.engine === "llama-bench") {
+    // The model picker owns model_path; when a local model is chosen it takes
+    // precedence over the HuggingFace repo field, so hide that too.
+    hideKeys.add("model_path");
+    if (params.model_path) hideKeys.add("hf_repo");
+  }
   const advancedParams = (selected?.params ?? []).filter((p) => p.advanced && !hideKeys.has(p.key));
   const basicParams = (selected?.params ?? []).filter((p) => !p.advanced && !hideKeys.has(p.key));
 
@@ -133,6 +140,13 @@ export default function Tests({
                 <MlperfConfigPicker
                   value={(params.config_path as string) || ""}
                   onChange={(path) => setParams((prev) => ({ ...prev, config_path: path }))}
+                />
+              )}
+
+              {selected.engine === "llama-bench" && (
+                <LlamaModelPicker
+                  value={(params.model_path as string) || ""}
+                  onChange={(path) => setParams((prev) => ({ ...prev, model_path: path }))}
                 />
               )}
 
@@ -268,6 +282,69 @@ function MlperfConfigPicker({
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+function LlamaModelPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (path: string) => void;
+}) {
+  const [models, setModels] = useState<LocalModel[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .models()
+      .then((r) => alive && setModels(r.local.filter((m) => m.name.toLowerCase().endsWith(".gguf"))))
+      .catch(() => alive && setModels([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <div className="mb-4 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <Boxes size={15} className="text-brand-400" />
+        <label className="label !normal-case !tracking-normal text-slate-200">Model</label>
+      </div>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">HuggingFace repo (use the field below)</option>
+        {(models ?? []).length > 0 && (
+          <optgroup label="Downloaded models">
+            {models!.map((m) => (
+              <option key={m.path} value={m.path}>
+                {m.name} ({m.size_mb} MB)
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+      <p className="mt-1 text-xs text-slate-500">
+        {value ? (
+          "Benchmarking a local model file."
+        ) : models && models.length === 0 ? (
+          <>
+            No local models yet — pull one with <code>-hf</code> below, or download from the{" "}
+            <Link to="/models" className="text-brand-300 underline">
+              Models
+            </Link>{" "}
+            page.
+          </>
+        ) : (
+          <>
+            Pick a downloaded model, or use a HuggingFace repo below. Manage models on the{" "}
+            <Link to="/models" className="text-brand-300 underline">
+              Models
+            </Link>{" "}
+            page.
+          </>
+        )}
+      </p>
     </div>
   );
 }
