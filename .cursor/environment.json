@@ -1,0 +1,14 @@
+{
+  "name": "AI-Bench",
+  "install": "python3 -m pip install --break-system-packages -r backend/requirements.txt\npython3 -m pip install --break-system-packages pytest\nnpm --prefix frontend ci\nnpm --prefix frontend run build",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "cd /workspace/backend && python3 -m uvicorn aibench.main:app --host 127.0.0.1 --port 8760"
+    },
+    {
+      "name": "frontend",
+      "command": "cd /workspace/frontend && npm run dev"
+    }
+  ]
+}
