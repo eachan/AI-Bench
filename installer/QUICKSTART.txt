@@ -1,0 +1,28 @@
+AI-Bench - Quick Start
+======================
+
+Thanks for downloading AI-Bench, a local ML/LLM performance profiler.
+
+This distribution contains everything you need. To install:
+
+  1. Extract this .zip file to any folder.
+  2. Double-click  AI-Bench-Setup.exe
+  3. Click through the setup wizard (Welcome -> License -> Install -> Finish).
+  4. Launch "AI-Bench" from the Start Menu or the Desktop shortcut.
+
+That's it - no Python, Node.js, or command line required. The app bundles the
+web UI and both benchmark engines (llama.cpp's llama-bench and the MLPerf
+Client). Models and data sets are downloaded from within the app on first use.
+
+To uninstall: use "Apps & features" / "Add or remove programs" in Windows, or
+the "Uninstall AI-Bench" entry in the Start Menu. You'll be asked whether to
+also remove your saved results and downloaded models.
+
+Notes
+-----
+- Windows 10/11 (x64). A discrete GPU is optional; CPU-only benchmarks and the
+  built-in synthetic capability test work without one.
+- This installer is currently unsigned, so Windows SmartScreen may warn on first
+  run. Choose "More info" -> "Run anyway" to proceed.
+
+Project: https://github.com/eachan/AI-Bench

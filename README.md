@@ -66,12 +66,19 @@ snapshot the hardware they ran on.
 
 ### Windows (end users) — wizard installer
 
-1. Download `AI-Bench-Setup-<version>.zip` (from the project's Releases, or the
-   **Build Windows Installer** GitHub Actions run artifacts).
-2. Unzip it and run **`AI-Bench-Setup.exe`**.
+1. Download the **distribution file** `AI-Bench-<version>-windows-x64.zip` (from
+   the project's Releases, or the **Build Windows Installer** GitHub Actions run
+   artifacts — it is rebuilt on every change).
+2. Extract it and run **`AI-Bench-Setup.exe`** (a `QUICKSTART.txt` is included).
 3. Click through the wizard (Welcome → License → install location → optional
    desktop shortcut → Install → Finish). No Python, Node, or command line needed.
 4. Launch **AI-Bench** from the Start Menu or Desktop shortcut.
+
+> **The distribution file** is a single, self-contained zip that contains
+> everything an end user needs: the wizard installer (which itself bundles the
+> app, web UI, and both benchmark engines) plus a quick-start guide. CI builds a
+> fresh one on every push, and `installer/build_installer.ps1` produces it
+> locally at `installer/Output/AI-Bench-<version>-windows-x64.zip`.
 
 The installer is fully self-contained (the app is packaged with PyInstaller and
 the web UI is bundled), registers a proper **uninstaller** in *Apps & features*
