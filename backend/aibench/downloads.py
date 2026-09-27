@@ -34,6 +34,52 @@ class DownloadState:
             return 0.0
         return round(self.downloaded_bytes / self.total_bytes * 100.0, 1)
 
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "url": self.url,
+            "dest": self.dest,
+            "name": Path(self.dest).name,
+            "total_bytes": self.total_bytes,
+            "downloaded_bytes": self.downloaded_bytes,
+            "total_mb": round(self.total_bytes / (1024 * 1024), 1),
+            "downloaded_mb": round(self.downloaded_bytes / (1024 * 1024), 1),
+            "percent": self.percent,
+            "status": self.status,
+            "error": self.error,
+        }
+
+
+# A small curated set of GGUF models users can download with one click. These
+# are pulled straight from HuggingFace "resolve" URLs by the download manager;
+# users can also paste any direct URL. Kept intentionally small/varied.
+SUGGESTED_MODELS: list[dict] = [
+    {
+        "id": "smollm2-135m-q4",
+        "name": "SmolLM2 135M Instruct",
+        "quant": "Q4_K_M",
+        "size_mb": 105,
+        "filename": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q4_K_M.gguf",
+    },
+    {
+        "id": "qwen25-05b-q4",
+        "name": "Qwen2.5 0.5B Instruct",
+        "quant": "Q4_K_M",
+        "size_mb": 398,
+        "filename": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    },
+    {
+        "id": "llama32-1b-q4",
+        "name": "Llama 3.2 1B Instruct",
+        "quant": "Q4_K_M",
+        "size_mb": 808,
+        "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+        "url": "https://huggingface.co/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    },
+]
+
 
 _downloads: dict[str, DownloadState] = {}
 _lock = threading.Lock()
@@ -64,6 +110,20 @@ def list_local_models() -> list[dict]:
                     }
                 )
     return files
+
+
+def delete_local_model(path: str) -> bool:
+    """Delete a downloaded model/dataset file. Restricted to the app's dirs."""
+
+    config.ensure_dirs()
+    target = Path(path).resolve()
+    allowed = (config.MODELS_DIR.resolve(), config.DATASETS_DIR.resolve())
+    if not any(str(target).startswith(str(root)) for root in allowed):
+        raise ValueError("Refusing to delete a path outside the model directories")
+    if target.is_file():
+        target.unlink()
+        return True
+    return False
 
 
 def start_download(url: str, kind: str = "model", filename: Optional[str] = None) -> DownloadState:

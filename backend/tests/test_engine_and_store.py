@@ -6,6 +6,8 @@ import tempfile
 # Route all app data to a temp dir before importing modules that read config.
 os.environ["AIBENCH_DATA_DIR"] = tempfile.mkdtemp(prefix="aibench-test-")
 
+from aibench import config as _config  # noqa: E402
+from aibench import downloads  # noqa: E402
 from aibench import store  # noqa: E402
 from aibench.catalog import get_catalog, get_definition  # noqa: E402
 from aibench.hardware import detect_hardware  # noqa: E402
@@ -78,3 +80,25 @@ def test_store_roundtrip_and_profile_export():
     payload = profile.model_dump()
     imported = store.import_profile(payload)
     assert len(imported.results) >= 1
+
+
+def test_model_catalog_has_valid_entries():
+    assert downloads.SUGGESTED_MODELS
+    for m in downloads.SUGGESTED_MODELS:
+        assert {"id", "name", "quant", "size_mb", "filename", "url"} <= set(m)
+        assert m["url"].startswith("http")
+        assert m["filename"].endswith(".gguf")
+
+
+def test_delete_local_model_scoped_and_working():
+    _config.ensure_dirs()
+    f = _config.MODELS_DIR / "dummy.gguf"
+    f.write_bytes(b"gguf-bytes")
+    assert downloads.delete_local_model(str(f)) is True
+    assert not f.exists()
+    # Refuses paths outside the managed model directories.
+    try:
+        downloads.delete_local_model("/etc/hosts")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass

@@ -140,7 +140,15 @@ async def import_profile(payload: dict) -> dict:
 # --------------------------------------------------------------------------- #
 @app.get("/api/models")
 async def models() -> dict:
-    return {"local": downloads.list_local_models(), "downloads": [d.__dict__ for d in downloads.list_downloads()]}
+    return {
+        "local": downloads.list_local_models(),
+        "downloads": [d.to_dict() for d in downloads.list_downloads()],
+    }
+
+
+@app.get("/api/models/catalog")
+async def models_catalog() -> dict:
+    return {"models": downloads.SUGGESTED_MODELS}
 
 
 @app.post("/api/downloads")
@@ -149,7 +157,16 @@ async def create_download(payload: dict) -> dict:
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
     state = downloads.start_download(url, payload.get("kind", "model"), payload.get("filename"))
-    return state.__dict__
+    return state.to_dict()
+
+
+@app.delete("/api/models")
+async def delete_model(path: str) -> dict:
+    try:
+        deleted = downloads.delete_local_model(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": deleted}
 
 
 # --------------------------------------------------------------------------- #
