@@ -178,5 +178,21 @@ if (-not (Test-Path $Setup)) { throw "Installer was not produced." }
 # Sign the final installer (if a certificate is configured).
 Invoke-CodeSign $Setup
 
+# --- 6. Assemble the single distribution zip ------------------------------- #
+# One self-contained download: the installer + a quick-start guide. This is the
+# "distribution file" end users grab; it is rebuilt on every change.
+Write-Step "Assembling distribution zip"
+$OutDir = "$RepoRoot\installer\Output"
+$Stage = "$OutDir\dist-stage"
+Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $Stage | Out-Null
+Copy-Item $Setup (Join-Path $Stage "AI-Bench-Setup.exe") -Force
+Copy-Item "$RepoRoot\installer\QUICKSTART.txt" (Join-Path $Stage "QUICKSTART.txt") -Force
+$DistZip = "$OutDir\AI-Bench-$Version-windows-x64.zip"
+Remove-Item $DistZip -ErrorAction SilentlyContinue
+Compress-Archive -Path "$Stage\*" -DestinationPath $DistZip -Force
+Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
+
 Write-Step "Done"
-Write-Host "    Installer: $Setup" -ForegroundColor Green
+Write-Host "    Installer:    $Setup" -ForegroundColor Green
+Write-Host "    Distribution: $DistZip" -ForegroundColor Green
