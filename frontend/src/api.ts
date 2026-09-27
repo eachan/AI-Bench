@@ -85,6 +85,36 @@ export type RunResult = {
   finished_at?: string | null;
 };
 
+export type LocalModel = { name: string; path: string; size_mb: number; kind: string };
+export type DownloadState = {
+  id: string;
+  url: string;
+  dest: string;
+  name: string;
+  total_mb: number;
+  downloaded_mb: number;
+  percent: number;
+  status: "pending" | "downloading" | "completed" | "failed";
+  error?: string | null;
+};
+export type CatalogModel = {
+  id: string;
+  name: string;
+  quant: string;
+  size_mb: number;
+  filename: string;
+  url: string;
+};
+
+export type MlperfConfig = {
+  path: string;
+  name: string;
+  category: string;
+  scenario: string;
+  ep: string;
+  device: string;
+};
+
 export type ProgressEvent = {
   type: "progress" | "log" | "status" | "metric";
   run_id: string;
@@ -106,6 +136,10 @@ export const api = {
   refreshHardware: () =>
     fetch("/api/hardware/refresh", { method: "POST" }).then((r) => j<Hardware>(r)),
   benchmarks: () => fetch("/api/benchmarks").then((r) => j<Benchmark[]>(r)),
+  mlperfConfigs: () =>
+    fetch("/api/mlperf/configs").then((r) =>
+      j<{ home: string | null; configs: MlperfConfig[] }>(r)
+    ),
   runs: () => fetch("/api/runs").then((r) => j<RunResult[]>(r)),
   run: (id: string) => fetch(`/api/runs/${id}`).then((r) => j<RunResult>(r)),
   createRun: (body: { benchmark_id: string; label?: string; params: Record<string, unknown> }) =>
@@ -118,6 +152,22 @@ export const api = {
     fetch(`/api/runs/${id}/cancel`, { method: "POST" }).then((r) => j<{ cancelled: boolean }>(r)),
   deleteRun: (id: string) =>
     fetch(`/api/runs/${id}`, { method: "DELETE" }).then((r) => j<{ deleted: boolean }>(r)),
+  models: () =>
+    fetch("/api/models").then((r) =>
+      j<{ local: LocalModel[]; downloads: DownloadState[] }>(r)
+    ),
+  modelsCatalog: () =>
+    fetch("/api/models/catalog").then((r) => j<{ models: CatalogModel[] }>(r)),
+  startDownload: (body: { url: string; kind?: string; filename?: string }) =>
+    fetch("/api/downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<DownloadState>(r)),
+  deleteModel: (path: string) =>
+    fetch(`/api/models?path=${encodeURIComponent(path)}`, { method: "DELETE" }).then((r) =>
+      j<{ deleted: boolean }>(r)
+    ),
   exportProfileUrl: "/api/profile/export",
   importProfile: (payload: unknown) =>
     fetch("/api/profile/import", {

@@ -9,6 +9,7 @@ environment variables, which the Windows installer/launcher sets.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -33,11 +34,58 @@ CONFIGS_DIR = DATA_DIR / "configs"
 BIN_DIR = DATA_DIR / "bin"
 DB_PATH = DATA_DIR / "aibench.db"
 
-# Optional paths to external benchmark binaries. The Windows installer downloads
-# these; when unset the app falls back to the built-in synthetic benchmarks so it
-# is always usable out of the box.
-LLAMA_BENCH_PATH = os.environ.get("AIBENCH_LLAMA_BENCH")
-MLPERF_CLIENT_PATH = os.environ.get("AIBENCH_MLPERF_CLIENT")
+def _bin_roots() -> list[Path]:
+    """Candidate ``bin/`` roots for benchmark binaries bundled with a packaged
+    (PyInstaller) app: next to the executable, its ``_internal`` dir, and the
+    ``_MEIPASS`` temp dir."""
+
+    exe_dir = Path(sys.executable).resolve().parent
+    roots = [exe_dir / "bin", exe_dir / "_internal" / "bin"]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(Path(meipass) / "bin")
+    return roots
+
+
+def _search_bin(patterns: list[str]) -> str | None:
+    for root in _bin_roots():
+        if not root.exists():
+            continue
+        for pat in patterns:
+            for match in sorted(root.rglob(pat)):
+                if match.is_file():
+                    return str(match)
+    return None
+
+
+def _resolve_binary(env_var: str, patterns: list[str]) -> str | None:
+    override = os.environ.get(env_var)
+    if override:
+        return override
+    # Only auto-discover bundled binaries in a packaged app.
+    if not getattr(sys, "frozen", False):
+        return None
+    return _search_bin(patterns)
+
+
+_EXE_SUFFIX = ".exe" if os.name == "nt" else ""
+
+if os.name == "nt":
+    _MLPERF_PATTERNS = ["mlperf-windows-x64.exe", "mlperf-windows.exe", "mlperf.exe"]
+else:
+    _MLPERF_PATTERNS = ["mlperf-linux", "mlperf-macos", "mlperf"]
+
+# Optional paths to external benchmark binaries. The Windows installer bundles
+# these; when unset the app falls back to the built-in synthetic benchmarks so
+# it is always usable out of the box.
+LLAMA_BENCH_PATH = _resolve_binary("AIBENCH_LLAMA_BENCH", [f"llama-bench{_EXE_SUFFIX}"])
+MLPERF_CLIENT_PATH = _resolve_binary("AIBENCH_MLPERF_CLIENT", _MLPERF_PATTERNS)
+
+# Directory that holds the MLPerf Client's stock scenario configs (llm/,
+# agentic/, image-gen/). These ship next to the binary. Overridable for dev.
+MLPERF_HOME = os.environ.get("AIBENCH_MLPERF_HOME") or (
+    str(Path(MLPERF_CLIENT_PATH).resolve().parent) if MLPERF_CLIENT_PATH else None
+)
 
 
 def ensure_dirs() -> None:

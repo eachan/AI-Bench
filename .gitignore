@@ -10,6 +10,13 @@ venv/
 node_modules/
 frontend/dist/
 
+# Build / packaging artifacts (PyInstaller, Inno Setup)
+/dist/
+/build/
+.build-venv/
+.build-bin/
+installer/Output/
+
 # App data / local artifacts
 data/
 *.db

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { Activity, Cpu, FlaskConical, GitCompare, Wifi, WifiOff } from "lucide-react";
+import { Activity, Boxes, Cpu, FlaskConical, GitCompare, TrendingUp, Wifi, WifiOff } from "lucide-react";
 import {
   api,
   Benchmark,
@@ -13,12 +13,16 @@ import Dashboard from "./pages/Dashboard";
 import Tests from "./pages/Tests";
 import Results from "./pages/Results";
 import Compare from "./pages/Compare";
+import Models from "./pages/Models";
+import Trends from "./pages/Trends";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: Cpu },
   { to: "/tests", label: "Tests", icon: FlaskConical },
+  { to: "/models", label: "Models", icon: Boxes },
   { to: "/results", label: "Results", icon: Activity },
   { to: "/compare", label: "Compare", icon: GitCompare },
+  { to: "/trends", label: "Trends", icon: TrendingUp },
 ];
 
 export default function App() {
@@ -73,9 +77,11 @@ export default function App() {
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-60 flex-col border-r border-white/10 bg-slate-950/60 p-4">
         <div className="mb-8 flex items-center gap-2 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 font-bold text-white">
-            AI
-          </div>
+          <img
+            src="/logo.png"
+            alt="AI-Bench"
+            className="h-9 w-9 rounded-xl object-cover ring-1 ring-white/10"
+          />
           <div>
             <div className="font-semibold leading-tight text-white">AI-Bench</div>
             <div className="text-[11px] text-slate-500">Local ML/LLM profiler</div>
@@ -133,8 +139,10 @@ export default function App() {
                 />
               }
             />
+            <Route path="/models" element={<Models />} />
             <Route path="/results" element={<Results runs={runs} onRunsChanged={refreshRuns} />} />
             <Route path="/compare" element={<Compare runs={runs} />} />
+            <Route path="/trends" element={<Trends runs={runs} />} />
           </Routes>
         </div>
       </main>

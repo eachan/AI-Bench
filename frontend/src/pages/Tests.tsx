@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Play, Settings2, StopCircle } from "lucide-react";
-import { api, Benchmark, RunResult } from "../api";
+import { Boxes, ChevronDown, FileCog, Play, Settings2, StopCircle } from "lucide-react";
+import { api, Benchmark, LocalModel, MlperfConfig, RunResult } from "../api";
+import { Link } from "react-router-dom";
 import { Card, Empty, ProgressBar, SectionTitle, StatusBadge } from "../components/ui";
 import ParamControl from "../components/ParamControl";
 import { SeriesLineChart } from "../components/charts";
@@ -58,8 +59,27 @@ export default function Tests({
     }
   };
 
-  const advancedParams = selected?.params.filter((p) => p.advanced) ?? [];
-  const basicParams = selected?.params.filter((p) => !p.advanced) ?? [];
+  // For MLPerf the dedicated config picker owns `config_path`, so hide the raw
+  // string field. When a specific stock config is selected, its JSON already
+  // defines the scenario/EP/device/iterations, so hide those matcher params
+  // too (they only drive Auto selection / a synthesized config).
+  const hideKeys = new Set<string>();
+  if (selected?.engine === "mlperf") {
+    hideKeys.add("config_path");
+    if (params.config_path) {
+      ["scenario", "backend", "llama_backend", "device_type", "iterations", "warmup"].forEach((k) =>
+        hideKeys.add(k)
+      );
+    }
+  }
+  if (selected?.engine === "llama-bench") {
+    // The model picker owns model_path; when a local model is chosen it takes
+    // precedence over the HuggingFace repo field, so hide that too.
+    hideKeys.add("model_path");
+    if (params.model_path) hideKeys.add("hf_repo");
+  }
+  const advancedParams = (selected?.params ?? []).filter((p) => p.advanced && !hideKeys.has(p.key));
+  const basicParams = (selected?.params ?? []).filter((p) => !p.advanced && !hideKeys.has(p.key));
 
   return (
     <div className="space-y-6">
@@ -116,6 +136,20 @@ export default function Tests({
                 <input className="input mt-1" value={label} onChange={(e) => setLabel(e.target.value)} />
               </div>
 
+              {selected.engine === "mlperf" && (
+                <MlperfConfigPicker
+                  value={(params.config_path as string) || ""}
+                  onChange={(path) => setParams((prev) => ({ ...prev, config_path: path }))}
+                />
+              )}
+
+              {selected.engine === "llama-bench" && (
+                <LlamaModelPicker
+                  value={(params.model_path as string) || ""}
+                  onChange={(path) => setParams((prev) => ({ ...prev, model_path: path }))}
+                />
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 {basicParams.map((p) => (
                   <ParamControl
@@ -167,6 +201,150 @@ export default function Tests({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function configLabel(c: MlperfConfig): string {
+  const scenario = c.scenario || c.name;
+  const parts = [scenario, c.ep, c.device].filter(Boolean);
+  return parts.join(" · ") || c.name;
+}
+
+function MlperfConfigPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (path: string) => void;
+}) {
+  const [configs, setConfigs] = useState<MlperfConfig[] | null>(null);
+  const [home, setHome] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .mlperfConfigs()
+      .then((r) => {
+        if (!alive) return;
+        setConfigs(r.configs);
+        setHome(r.home);
+      })
+      .catch(() => alive && setConfigs([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Group discovered configs by their top-level category for readable optgroups.
+  const groups = useMemo(() => {
+    const g: Record<string, MlperfConfig[]> = {};
+    (configs ?? []).forEach((c) => {
+      const key = c.category || "other";
+      (g[key] ||= []).push(c);
+    });
+    return g;
+  }, [configs]);
+
+  return (
+    <div className="mb-4 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <FileCog size={15} className="text-brand-400" />
+        <label className="label !normal-case !tracking-normal text-slate-200">
+          MLPerf scenario config
+        </label>
+      </div>
+      {configs === null ? (
+        <p className="text-xs text-slate-500">Loading bundled configs…</p>
+      ) : configs.length === 0 ? (
+        <p className="text-xs text-slate-500">
+          No bundled configs found. The runner will auto-generate one, or install the MLPerf
+          Client via the AI-Bench installer to use its stock configs.
+        </p>
+      ) : (
+        <>
+          <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">Auto — match execution provider &amp; device below</option>
+            {Object.entries(groups).map(([cat, items]) => (
+              <optgroup key={cat} label={cat}>
+                {items.map((c) => (
+                  <option key={c.path} value={c.path}>
+                    {configLabel(c)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            {value
+              ? "Using the selected stock config; its scenario, provider and iterations are applied as-is."
+              : `${configs.length} stock configs available${home ? ` in ${home}` : ""}.`}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function LlamaModelPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (path: string) => void;
+}) {
+  const [models, setModels] = useState<LocalModel[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .models()
+      .then((r) => alive && setModels(r.local.filter((m) => m.name.toLowerCase().endsWith(".gguf"))))
+      .catch(() => alive && setModels([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <div className="mb-4 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <Boxes size={15} className="text-brand-400" />
+        <label className="label !normal-case !tracking-normal text-slate-200">Model</label>
+      </div>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">HuggingFace repo (use the field below)</option>
+        {(models ?? []).length > 0 && (
+          <optgroup label="Downloaded models">
+            {models!.map((m) => (
+              <option key={m.path} value={m.path}>
+                {m.name} ({m.size_mb} MB)
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+      <p className="mt-1 text-xs text-slate-500">
+        {value ? (
+          "Benchmarking a local model file."
+        ) : models && models.length === 0 ? (
+          <>
+            No local models yet — pull one with <code>-hf</code> below, or download from the{" "}
+            <Link to="/models" className="text-brand-300 underline">
+              Models
+            </Link>{" "}
+            page.
+          </>
+        ) : (
+          <>
+            Pick a downloaded model, or use a HuggingFace repo below. Manage models on the{" "}
+            <Link to="/models" className="text-brand-300 underline">
+              Models
+            </Link>{" "}
+            page.
+          </>
+        )}
+      </p>
     </div>
   );
 }
