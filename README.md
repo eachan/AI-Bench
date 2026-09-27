@@ -52,7 +52,8 @@ ai-bench/
 │   └── aibench/    runner adapters, downloads, SQLite storage, REST + WebSocket
 ├── frontend/       React + TypeScript + Vite + Tailwind + Recharts UI
 ├── desktop/        pywebview launcher (native desktop window)
-├── installer/      install.ps1 (Windows one-script install) + run script
+├── installer/      Inno Setup wizard (ai-bench.iss), PyInstaller spec,
+│                   build_installer.ps1, and lightweight install.ps1 bootstrap
 └── scripts/        dev.sh (macOS/Linux dev launcher)
 ```
 
@@ -64,14 +65,38 @@ snapshot the hardware they ran on.
 
 ## Install & run
 
-### Windows (end users)
+### Windows (end users) — wizard installer
+
+1. Download `AI-Bench-Setup-<version>.zip` (from the project's Releases, or the
+   **Build Windows Installer** GitHub Actions run artifacts).
+2. Unzip it and run **`AI-Bench-Setup.exe`**.
+3. Click through the wizard (Welcome → License → install location → optional
+   desktop shortcut → Install → Finish). No Python, Node, or command line needed.
+4. Launch **AI-Bench** from the Start Menu or Desktop shortcut.
+
+The installer is fully self-contained (the app is packaged with PyInstaller and
+the web UI is bundled), registers a proper **uninstaller** in *Apps & features*
+/ *Add or remove programs*, and on uninstall offers to also remove your saved
+results and downloaded models.
+
+> Prefer a lightweight, source-based bootstrap instead of the packaged app?
+> `installer\install.ps1` sets up a venv, builds the UI, and creates shortcuts
+> without PyInstaller (it installs Python/Node via winget if missing).
+
+### Building the Windows installer yourself
+
+The installer is built automatically on Windows by GitHub Actions
+(`.github/workflows/build-installer.yml`) and uploaded as an artifact. To build
+locally on Windows (requires Python, Node, and [Inno Setup 6](https://jrsoftware.org/isdl.php)):
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-.\installer\install.ps1
+.\installer\build_installer.ps1 -Version 0.1.0
+# → installer\Output\AI-Bench-Setup.exe
 ```
 
-Then launch **AI-Bench** from the Start Menu or Desktop shortcut.
+This builds the UI, packages the app with PyInstaller (`installer\aibench.spec`),
+bundles the `llama-bench` binary, and compiles the Inno Setup wizard
+(`installer\ai-bench.iss`).
 
 ### Developers (macOS / Linux)
 
