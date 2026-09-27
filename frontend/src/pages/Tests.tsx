@@ -59,8 +59,18 @@ export default function Tests({
   };
 
   // For MLPerf the dedicated config picker owns `config_path`, so hide the raw
-  // string field to avoid two controls editing the same value.
-  const hideKeys = selected?.engine === "mlperf" ? new Set(["config_path"]) : new Set<string>();
+  // string field. When a specific stock config is selected, its JSON already
+  // defines the scenario/EP/device/iterations, so hide those matcher params
+  // too (they only drive Auto selection / a synthesized config).
+  const hideKeys = new Set<string>();
+  if (selected?.engine === "mlperf") {
+    hideKeys.add("config_path");
+    if (params.config_path) {
+      ["scenario", "backend", "llama_backend", "device_type", "iterations", "warmup"].forEach((k) =>
+        hideKeys.add(k)
+      );
+    }
+  }
   const advancedParams = (selected?.params ?? []).filter((p) => p.advanced && !hideKeys.has(p.key));
   const basicParams = (selected?.params ?? []).filter((p) => !p.advanced && !hideKeys.has(p.key));
 
@@ -253,7 +263,7 @@ function MlperfConfigPicker({
           </select>
           <p className="mt-1 text-xs text-slate-500">
             {value
-              ? "Using the selected stock config."
+              ? "Using the selected stock config; its scenario, provider and iterations are applied as-is."
               : `${configs.length} stock configs available${home ? ` in ${home}` : ""}.`}
           </p>
         </>
