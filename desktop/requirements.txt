@@ -1,0 +1,4 @@
+# Extra dependency for the native desktop window (Windows uses the bundled
+# EdgeChromium/WebView2 runtime). The app also works without this by falling
+# back to the default browser.
+pywebview==5.3.2
