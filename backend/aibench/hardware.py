@@ -1,27 +1,40 @@
 """Cross-platform hardware detection.
 
-Detects CPU, memory and GPUs on Windows, Linux and macOS. GPU detection is
-best-effort: it tries ``nvidia-smi`` first, then platform-specific queries
-(``wmic`` on Windows, ``system_profiler`` on macOS). Everything degrades
-gracefully to an empty GPU list when nothing is found, so the app is fully
-functional on machines without a discrete GPU.
+Detects CPU, memory and GPUs on Windows, Linux and macOS.
+
+Windows note: modern Windows 11 (24H2/25H2) removes ``wmic`` by default, so we
+use PowerShell CIM (``Get-CimInstance``) as the primary source, with ``wmic``
+only as a legacy fallback. GPU VRAM is resolved from reliable sources rather
+than ``Win32_VideoController.AdapterRAM`` (a 32-bit field that cannot represent
+>4 GB): ``nvidia-smi`` for NVIDIA cards and the display-driver registry
+(``HardwareInformation.qwMemorySize``) for every adapter, so multi-GPU rigs and
+large-VRAM / non-NVIDIA cards report correctly.
+
+Parsing is split into pure functions (``parse_*`` / ``build_windows_gpus``) so
+the platform-specific logic can be unit-tested with captured command output.
 """
 
 from __future__ import annotations
 
+import csv
+import io
+import os
 import platform
 import re
 import shutil
 import subprocess
 import sys
 from functools import lru_cache
+from typing import Optional
 
 import psutil
 
 from .schemas import CpuInfo, GpuInfo, HardwareInfo
 
+_GPU_CLASS_GUID = "{4d36e968-e325-11ce-bfc1-08002be10318}"
 
-def _run(cmd: list[str], timeout: float = 6.0) -> str:
+
+def _run(cmd: list[str], timeout: float = 15.0) -> str:
     try:
         out = subprocess.run(
             cmd,
@@ -35,6 +48,180 @@ def _run(cmd: list[str], timeout: float = 6.0) -> str:
         return ""
 
 
+def _powershell(script: str) -> str:
+    exe = shutil.which("powershell") or shutil.which("pwsh")
+    if not exe:
+        return ""
+    return _run([exe, "-NoProfile", "-NonInteractive", "-Command", script])
+
+
+# --------------------------------------------------------------------------- #
+# Pure parsers (unit-tested)
+# --------------------------------------------------------------------------- #
+def parse_csv_rows(text: str) -> list[dict[str, str]]:
+    """Parse PowerShell ``ConvertTo-Csv -NoTypeInformation`` output into rows."""
+
+    text = (text or "").strip()
+    if not text:
+        return []
+    # ConvertTo-Csv may emit a leading "#TYPE ..." line on some hosts.
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#TYPE")]
+    if not lines:
+        return []
+    reader = csv.DictReader(io.StringIO("\n".join(lines)))
+    return [{(k or "").strip(): (v or "").strip() for k, v in row.items()} for row in reader]
+
+
+def parse_nvidia_smi_csv(text: str) -> list[dict]:
+    """Parse ``nvidia-smi --query-gpu=name,memory.total,driver_version`` output."""
+
+    gpus: list[dict] = []
+    for line in (text or "").splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if not parts or not parts[0]:
+            continue
+        name = parts[0]
+        mem = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else None
+        driver = parts[2] if len(parts) >= 3 and parts[2] else None
+        gpus.append({"name": name, "memory_mb": mem, "driver": driver})
+    return gpus
+
+
+def parse_registry_vram_csv(text: str) -> dict[str, int]:
+    """Map adapter name (lowercased) -> VRAM bytes from the driver registry CSV."""
+
+    out: dict[str, int] = {}
+    for row in parse_csv_rows(text):
+        name = (row.get("Name") or "").strip()
+        mem = (row.get("Mem") or "").strip()
+        if name and mem.lstrip("-").isdigit():
+            val = int(mem)
+            if val > 0:
+                out[name.lower()] = val
+    return out
+
+
+def windows_cpu_name_from_cim(text: str) -> Optional[str]:
+    rows = parse_csv_rows(text)
+    if rows:
+        name = (rows[0].get("Name") or "").strip()
+        return name or None
+    return None
+
+
+def _vendor_from_name(name: str) -> str:
+    low = name.lower()
+    if "nvidia" in low or "geforce" in low or "rtx" in low or "gtx" in low or "quadro" in low:
+        return "NVIDIA"
+    if "amd" in low or "radeon" in low:
+        return "AMD"
+    if "intel" in low or "arc" in low:
+        return "Intel"
+    if "apple" in low:
+        return "Apple"
+    return "Unknown"
+
+
+def _backend_for_vendor(vendor: str) -> str:
+    return {
+        "NVIDIA": "CUDA",
+        "AMD": "ROCm/DirectML",
+        "Intel": "OpenVINO/DirectML",
+        "Apple": "Metal",
+    }.get(vendor, "CPU")
+
+
+def _norm_gpu(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def _names_match(a: str, b: str) -> bool:
+    na, nb = _norm_gpu(a), _norm_gpu(b)
+    if not na or not nb:
+        return False
+    if na in nb or nb in na:
+        return True
+    # Match on a shared 3-5 digit model number (e.g. 5090, 3090).
+    ma = set(re.findall(r"\d{3,5}", a))
+    mb = set(re.findall(r"\d{3,5}", b))
+    return bool(ma & mb)
+
+
+def build_windows_gpus(
+    cim_gpus: list[dict],
+    nvidia: list[dict],
+    vram_by_name: dict[str, int],
+) -> list[GpuInfo]:
+    """Combine CIM adapter enumeration with accurate VRAM sources.
+
+    * Adapter names/drivers come from CIM (reliable for all vendors).
+    * VRAM comes from nvidia-smi (NVIDIA) or the driver registry (any vendor);
+      the unreliable CIM ``AdapterRAM`` is used only as a last resort and only
+      when it is a sane sub-4 GB value.
+    """
+
+    result: list[GpuInfo] = []
+    nvidia_used = [False] * len(nvidia)
+
+    def _vram_from_registry(name: str) -> Optional[int]:
+        key = name.lower()
+        if key in vram_by_name:
+            return vram_by_name[key] // (1024 * 1024)
+        for reg_name, b in vram_by_name.items():
+            if _names_match(reg_name, name):
+                return b // (1024 * 1024)
+        return None
+
+    for g in cim_gpus:
+        name = (g.get("name") or "").strip()
+        if not name:
+            continue
+        vendor = _vendor_from_name(name)
+        driver = g.get("driver") or None
+        mem: Optional[int] = None
+
+        if vendor == "NVIDIA":
+            for i, n in enumerate(nvidia):
+                if not nvidia_used[i] and _names_match(n["name"], name):
+                    mem = n.get("memory_mb")
+                    driver = n.get("driver") or driver
+                    nvidia_used[i] = True
+                    break
+        if mem is None:
+            mem = _vram_from_registry(name)
+        if mem is None:
+            ram = g.get("adapter_ram")
+            if isinstance(ram, int) and 0 < ram < 4 * 1024**3:
+                mem = ram // (1024 * 1024)
+
+        result.append(
+            GpuInfo(
+                name=name,
+                memory_mb=mem,
+                driver=driver,
+                vendor=vendor,
+                backend=_backend_for_vendor(vendor),
+            )
+        )
+
+    # Any NVIDIA GPUs that CIM missed (rare) — add from nvidia-smi directly.
+    for i, n in enumerate(nvidia):
+        if not nvidia_used[i]:
+            result.append(
+                GpuInfo(
+                    name=n["name"],
+                    memory_mb=n.get("memory_mb"),
+                    driver=n.get("driver"),
+                    vendor="NVIDIA",
+                    backend="CUDA",
+                )
+            )
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# CPU
+# --------------------------------------------------------------------------- #
 def _cpu_name() -> str:
     system = platform.system()
     if system == "Linux":
@@ -50,88 +237,94 @@ def _cpu_name() -> str:
         if name:
             return name
     elif system == "Windows":
-        # PROCESSOR_IDENTIFIER is coarse but always present.
-        import os
-
-        env = os.environ.get("PROCESSOR_IDENTIFIER")
+        # Primary: PowerShell CIM (works on Win11 24H2/25H2 where wmic is gone).
+        name = windows_cpu_name_from_cim(
+            _powershell("Get-CimInstance Win32_Processor | Select-Object Name | ConvertTo-Csv -NoTypeInformation")
+        )
+        if name:
+            return name
+        # Legacy fallback: wmic (older Windows).
         wmic = _run(["wmic", "cpu", "get", "name"])
         lines = [l.strip() for l in wmic.splitlines() if l.strip() and "Name" not in l]
         if lines:
             return lines[0]
+        env = os.environ.get("PROCESSOR_IDENTIFIER")
         if env:
             return env
     return platform.processor() or platform.machine() or "Unknown CPU"
 
 
-def _detect_nvidia_gpus() -> list[GpuInfo]:
+def _windows_cpu_mhz() -> Optional[float]:
+    rows = parse_csv_rows(
+        _powershell("Get-CimInstance Win32_Processor | Select-Object MaxClockSpeed | ConvertTo-Csv -NoTypeInformation")
+    )
+    if rows:
+        v = (rows[0].get("MaxClockSpeed") or "").strip()
+        if v.isdigit():
+            return float(v)
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# GPUs
+# --------------------------------------------------------------------------- #
+def _detect_nvidia_gpus() -> list[dict]:
     if not shutil.which("nvidia-smi"):
         return []
-    out = _run(
-        [
-            "nvidia-smi",
-            "--query-gpu=name,memory.total,driver_version",
-            "--format=csv,noheader,nounits",
-        ]
-    )
-    gpus: list[GpuInfo] = []
-    for line in out.splitlines():
-        parts = [p.strip() for p in line.split(",")]
-        if not parts or not parts[0]:
-            continue
-        name = parts[0]
-        mem = None
-        driver = None
-        if len(parts) >= 2 and parts[1].isdigit():
-            mem = int(parts[1])
-        if len(parts) >= 3:
-            driver = parts[2]
-        gpus.append(
-            GpuInfo(
-                name=name,
-                memory_mb=mem,
-                driver=driver,
-                vendor="NVIDIA",
-                backend="CUDA",
-            )
+    return parse_nvidia_smi_csv(
+        _run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total,driver_version",
+                "--format=csv,noheader,nounits",
+            ]
         )
-    return gpus
+    )
 
 
 def _detect_windows_gpus() -> list[GpuInfo]:
-    out = _run(
-        [
-            "wmic",
-            "path",
-            "win32_VideoController",
-            "get",
-            "Name,AdapterRAM,DriverVersion",
-            "/format:csv",
-        ]
-    )
-    gpus: list[GpuInfo] = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line or line.lower().startswith("node") or "," not in line:
-            continue
-        cols = line.split(",")
-        # CSV format: Node,AdapterRAM,DriverVersion,Name
-        if len(cols) < 4:
-            continue
-        ram, driver, name = cols[1].strip(), cols[2].strip(), cols[3].strip()
-        if not name:
-            continue
-        mem = int(ram) // (1024 * 1024) if ram.isdigit() else None
-        vendor = _vendor_from_name(name)
-        gpus.append(
-            GpuInfo(
-                name=name,
-                memory_mb=mem,
-                driver=driver or None,
-                vendor=vendor,
-                backend=_backend_for_vendor(vendor),
-            )
+    # 1) Enumerate all adapters (names + drivers) via CIM.
+    cim_rows: list[dict] = []
+    for row in parse_csv_rows(
+        _powershell(
+            "Get-CimInstance Win32_VideoController | "
+            "Select-Object Name,AdapterRAM,DriverVersion | ConvertTo-Csv -NoTypeInformation"
         )
-    return gpus
+    ):
+        ram = row.get("AdapterRAM", "")
+        cim_rows.append(
+            {
+                "name": row.get("Name", ""),
+                "driver": row.get("DriverVersion") or None,
+                "adapter_ram": int(ram) if ram.lstrip("-").isdigit() else None,
+            }
+        )
+
+    # 2) Accurate VRAM for every adapter from the display-driver registry.
+    vram = parse_registry_vram_csv(
+        _powershell(
+            "Get-ItemProperty "
+            f"'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{_GPU_CLASS_GUID}\\*' "
+            "-ErrorAction SilentlyContinue | "
+            "Where-Object { $_.'HardwareInformation.qwMemorySize' } | "
+            "Select-Object @{N='Name';E={$_.DriverDesc}},"
+            "@{N='Mem';E={$_.'HardwareInformation.qwMemorySize'}} | "
+            "ConvertTo-Csv -NoTypeInformation"
+        )
+    )
+
+    # 3) Accurate NVIDIA VRAM/driver from nvidia-smi.
+    nvidia = _detect_nvidia_gpus()
+
+    gpus = build_windows_gpus(cim_rows, nvidia, vram)
+    if gpus:
+        return gpus
+    # Legacy fallback if CIM/registry were unavailable: nvidia-smi only.
+    return [
+        GpuInfo(name=n["name"], memory_mb=n.get("memory_mb"), driver=n.get("driver"),
+                vendor="NVIDIA", backend="CUDA")
+        for n in nvidia
+    ]
 
 
 def _detect_macos_gpus() -> list[GpuInfo]:
@@ -155,40 +348,23 @@ def _detect_macos_gpus() -> list[GpuInfo]:
     return gpus
 
 
-def _vendor_from_name(name: str) -> str:
-    low = name.lower()
-    if "nvidia" in low or "geforce" in low or "rtx" in low or "quadro" in low:
-        return "NVIDIA"
-    if "amd" in low or "radeon" in low:
-        return "AMD"
-    if "intel" in low or "arc" in low:
-        return "Intel"
-    if "apple" in low:
-        return "Apple"
-    return "Unknown"
-
-
-def _backend_for_vendor(vendor: str) -> str:
-    return {
-        "NVIDIA": "CUDA",
-        "AMD": "ROCm/DirectML",
-        "Intel": "OpenVINO/DirectML",
-        "Apple": "Metal",
-    }.get(vendor, "CPU")
-
-
 def detect_gpus() -> list[GpuInfo]:
-    gpus = _detect_nvidia_gpus()
     system = platform.system()
     if system == "Windows":
-        # Merge in any non-NVIDIA adapters reported by Windows.
-        existing = {g.name for g in gpus}
-        for g in _detect_windows_gpus():
-            if g.name not in existing:
-                gpus.append(g)
-    elif system == "Darwin" and not gpus:
-        gpus = _detect_macos_gpus()
-    return gpus
+        return _detect_windows_gpus()
+    if system == "Darwin":
+        gpus = [
+            GpuInfo(name=n["name"], memory_mb=n.get("memory_mb"), driver=n.get("driver"),
+                    vendor="NVIDIA", backend="CUDA")
+            for n in _detect_nvidia_gpus()
+        ]
+        return gpus or _detect_macos_gpus()
+    # Linux (and others): nvidia-smi if present.
+    return [
+        GpuInfo(name=n["name"], memory_mb=n.get("memory_mb"), driver=n.get("driver"),
+                vendor="NVIDIA", backend="CUDA")
+        for n in _detect_nvidia_gpus()
+    ]
 
 
 @lru_cache(maxsize=1)
@@ -200,6 +376,8 @@ def detect_hardware() -> HardwareInfo:
             freq = cf.max or cf.current
     except Exception:  # pragma: no cover - platform dependent
         freq = None
+    if (not freq) and platform.system() == "Windows":
+        freq = _windows_cpu_mhz()
 
     cpu = CpuInfo(
         name=_cpu_name(),
