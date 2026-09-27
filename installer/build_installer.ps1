@@ -178,21 +178,23 @@ if (-not (Test-Path $Setup)) { throw "Installer was not produced." }
 # Sign the final installer (if a certificate is configured).
 Invoke-CodeSign $Setup
 
-# --- 6. Assemble the single distribution zip ------------------------------- #
-# One self-contained download: the installer + a quick-start guide. This is the
-# "distribution file" end users grab; it is rebuilt on every change.
-Write-Step "Assembling distribution zip"
+# --- 6. Assemble the distribution ------------------------------------------ #
+# The "distribution file" is a single zip containing the installer + a
+# quick-start guide. We stage the unzipped contents in Output\dist (which CI
+# uploads directly, so GitHub's artifact archive is the single zip and there is
+# no zip-inside-a-zip), and also produce the ready-to-share zip for local use.
+Write-Step "Assembling distribution"
 $OutDir = "$RepoRoot\installer\Output"
-$Stage = "$OutDir\dist-stage"
-Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-Copy-Item $Setup (Join-Path $Stage "AI-Bench-Setup.exe") -Force
-Copy-Item "$RepoRoot\installer\QUICKSTART.txt" (Join-Path $Stage "QUICKSTART.txt") -Force
+$Dist = "$OutDir\dist"
+Remove-Item -Recurse -Force $Dist -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $Dist | Out-Null
+Copy-Item $Setup (Join-Path $Dist "AI-Bench-Setup.exe") -Force
+Copy-Item "$RepoRoot\installer\QUICKSTART.txt" (Join-Path $Dist "QUICKSTART.txt") -Force
 $DistZip = "$OutDir\AI-Bench-$Version-windows-x64.zip"
 Remove-Item $DistZip -ErrorAction SilentlyContinue
-Compress-Archive -Path "$Stage\*" -DestinationPath $DistZip -Force
-Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
+Compress-Archive -Path "$Dist\*" -DestinationPath $DistZip -Force
 
 Write-Step "Done"
-Write-Host "    Installer:    $Setup" -ForegroundColor Green
-Write-Host "    Distribution: $DistZip" -ForegroundColor Green
+Write-Host "    Installer:      $Setup" -ForegroundColor Green
+Write-Host "    Distribution:   $DistZip (single zip)" -ForegroundColor Green
+Write-Host "    CI upload dir:  $Dist (unzipped; GitHub zips it once)" -ForegroundColor Green

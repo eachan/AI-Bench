@@ -60,7 +60,11 @@ jobs:
       - name: Upload distribution file
         uses: actions/upload-artifact@v4
         with:
-          # The single self-contained distribution zip users download & extract.
+          # Upload the UNZIPPED distribution contents (installer + quickstart).
+          # GitHub packages every artifact into a single zip on download, so
+          # uploading a pre-made zip would nest a zip inside a zip. Uploading the
+          # raw files makes the downloaded artifact itself the one distribution
+          # zip: AI-Bench-<version>-windows-x64.zip → AI-Bench-Setup.exe + QUICKSTART.txt.
           name: AI-Bench-${{ steps.ver.outputs.version }}-windows-x64
-          path: installer/Output/AI-Bench-${{ steps.ver.outputs.version }}-windows-x64.zip
+          path: installer/Output/dist/
           if-no-files-found: error
