@@ -77,7 +77,10 @@ snapshot the hardware they ran on.
 The installer is fully self-contained (the app is packaged with PyInstaller and
 the web UI is bundled), registers a proper **uninstaller** in *Apps & features*
 / *Add or remove programs*, and on uninstall offers to also remove your saved
-results and downloaded models.
+results and downloaded models. It bundles both benchmark engines —
+**llama.cpp `llama-bench`** and the **MLPerf Client** (with its stock scenario
+configs) — so those benchmarks work out of the box (model/data files download on
+first run).
 
 > Prefer a lightweight, source-based bootstrap instead of the packaged app?
 > `installer\install.ps1` sets up a venv, builds the UI, and creates shortcuts
@@ -92,11 +95,30 @@ locally on Windows (requires Python, Node, and [Inno Setup 6](https://jrsoftware
 ```powershell
 .\installer\build_installer.ps1 -Version 0.1.0
 # → installer\Output\AI-Bench-Setup.exe
+
+# Skip the (large) MLPerf Client download for a smaller installer:
+.\installer\build_installer.ps1 -SkipMlperf
 ```
 
 This builds the UI, packages the app with PyInstaller (`installer\aibench.spec`),
-bundles the `llama-bench` binary, and compiles the Inno Setup wizard
-(`installer\ai-bench.iss`).
+bundles the `llama-bench` and **MLPerf Client** binaries (the MLPerf CLI is
+pulled from the `mlcommons/mlperf_client` release, `-MlperfReleaseTag`), and
+compiles the Inno Setup wizard (`installer\ai-bench.iss`). Branding assets
+(`installer\aibench.ico`, wizard banners, web favicon/logo) are generated from a
+single source image with `python installer\gen_assets.py`.
+
+### Code signing (optional, recommended for distribution)
+
+To produce a **signed** installer (which avoids Windows SmartScreen warnings),
+provide an Authenticode code-signing certificate as a base64-encoded PFX. The
+build signs both the app executable and the final installer; if no certificate
+is configured the build still succeeds and produces an unsigned installer.
+
+- Locally: set `WINDOWS_CERT_PFX_BASE64` (and `WINDOWS_CERT_PASSWORD`) before
+  running `build_installer.ps1`.
+- In CI: add repository secrets `WINDOWS_CERT_PFX_BASE64` and
+  `WINDOWS_CERT_PASSWORD` (base64 of your `.pfx`); the workflow passes them
+  through automatically.
 
 ### Developers (macOS / Linux)
 
