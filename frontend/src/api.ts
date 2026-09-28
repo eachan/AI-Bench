@@ -106,6 +106,35 @@ export type CatalogModel = {
   url: string;
 };
 
+export type UpdateComponent = { name: string; version: string };
+export type ReleaseInfo = {
+  version: string;
+  tag: string;
+  notes: string;
+  url?: string | null;
+  published_at?: string | null;
+  installer_url?: string | null;
+  installer_name?: string | null;
+  installer_size?: number | null;
+  zip_url?: string | null;
+};
+export type UpdateCheck = {
+  current_version: string;
+  latest_version?: string;
+  update_available: boolean;
+  status: "up_to_date" | "update_available" | "no_releases" | "error";
+  message?: string;
+  packaged: boolean;
+  release?: ReleaseInfo;
+  components: UpdateComponent[];
+};
+export type UpdateStatus = {
+  status: "idle" | "checking" | "downloading" | "installing" | "unsupported" | "error" | "done";
+  percent: number;
+  message?: string | null;
+  version?: string | null;
+};
+
 export type MlperfConfig = {
   path: string;
   name: string;
@@ -168,6 +197,10 @@ export const api = {
     fetch(`/api/models?path=${encodeURIComponent(path)}`, { method: "DELETE" }).then((r) =>
       j<{ deleted: boolean }>(r)
     ),
+  checkUpdate: () => fetch("/api/update/check").then((r) => j<UpdateCheck>(r)),
+  applyUpdate: () =>
+    fetch("/api/update/apply", { method: "POST" }).then((r) => j<UpdateStatus>(r)),
+  updateStatus: () => fetch("/api/update/status").then((r) => j<UpdateStatus>(r)),
   exportProfileUrl: "/api/profile/export",
   importProfile: (payload: unknown) =>
     fetch("/api/profile/import", {

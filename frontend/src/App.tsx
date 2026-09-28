@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { Activity, Boxes, Cpu, FlaskConical, GitCompare, TrendingUp, Wifi, WifiOff } from "lucide-react";
+import { Activity, Boxes, Cpu, FlaskConical, GitCompare, Settings as SettingsIcon, TrendingUp, Wifi, WifiOff } from "lucide-react";
 import {
   api,
   Benchmark,
@@ -15,6 +15,7 @@ import Results from "./pages/Results";
 import Compare from "./pages/Compare";
 import Models from "./pages/Models";
 import Trends from "./pages/Trends";
+import Settings from "./pages/Settings";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: Cpu },
@@ -23,6 +24,7 @@ const NAV = [
   { to: "/results", label: "Results", icon: Activity },
   { to: "/compare", label: "Compare", icon: GitCompare },
   { to: "/trends", label: "Trends", icon: TrendingUp },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export default function App() {
@@ -143,6 +145,7 @@ export default function App() {
             <Route path="/results" element={<Results runs={runs} onRunsChanged={refreshRuns} />} />
             <Route path="/compare" element={<Compare runs={runs} />} />
             <Route path="/trends" element={<Trends runs={runs} />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>
       </main>
