@@ -395,6 +395,7 @@ def detect_hardware() -> HardwareInfo:
         cpu=cpu,
         memory_gb=mem_gb,
         gpus=detect_gpus(),
+        packaged=bool(getattr(sys, "frozen", False)),
     )
 
 

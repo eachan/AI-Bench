@@ -40,6 +40,10 @@ class HardwareInfo(BaseModel):
     cpu: CpuInfo
     memory_gb: float
     gpus: list[GpuInfo] = Field(default_factory=list)
+    # True only for the packaged desktop app (PyInstaller). When False the app
+    # is running from source / on a dev or cloud host, so the dashboard reflects
+    # that host rather than the user's own PC.
+    packaged: bool = False
     captured_at: str = Field(default_factory=utcnow_iso)
 
 
