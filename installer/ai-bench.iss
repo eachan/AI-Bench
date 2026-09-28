@@ -40,6 +40,11 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Let the in-app auto-updater upgrade over a running instance: the Restart
+; Manager closes AI-Bench for the file swap and relaunches it afterwards
+; (installer runs with /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS).
+CloseApplications=yes
+RestartApplications=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; Allow install without admin (per-user) or with admin (all users).

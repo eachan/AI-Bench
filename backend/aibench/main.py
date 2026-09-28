@@ -40,7 +40,33 @@ async def _startup() -> None:
 # --------------------------------------------------------------------------- #
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok", "version": __version__}
+    from .updater import current_version
+
+    return {"status": "ok", "version": current_version()}
+
+
+# --------------------------------------------------------------------------- #
+# Software updates
+# --------------------------------------------------------------------------- #
+@app.get("/api/update/check")
+async def update_check() -> dict:
+    from . import updater
+
+    return await asyncio.to_thread(updater.check_for_update)
+
+
+@app.post("/api/update/apply")
+async def update_apply() -> dict:
+    from . import updater
+
+    return updater.start_apply().to_dict()
+
+
+@app.get("/api/update/status")
+async def update_status() -> dict:
+    from . import updater
+
+    return updater.get_state().to_dict()
 
 
 @app.get("/api/hardware")
