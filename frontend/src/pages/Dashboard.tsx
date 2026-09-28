@@ -1,5 +1,5 @@
 import { ReactNode, useState } from "react";
-import { Cpu, HardDrive, MemoryStick, MonitorCog, RefreshCw, Server } from "lucide-react";
+import { Cpu, HardDrive, Info, MemoryStick, MonitorCog, RefreshCw, Server } from "lucide-react";
 import { api, Hardware, RunResult } from "../api";
 import { Card, Empty, SectionTitle, Stat, StatusBadge } from "../components/ui";
 
@@ -37,6 +37,24 @@ export default function Dashboard({
           </button>
         }
       />
+
+      {hardware && hardware.packaged === false && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <Info size={18} className="mt-0.5 shrink-0 text-amber-300" />
+          <div>
+            <div className="font-medium">This is a preview/dev instance, not your PC.</div>
+            <p className="mt-1 text-amber-200/90">
+              AI-Bench profiles the machine it runs on. This instance is running on{" "}
+              <span className="font-semibold">
+                {hardware.os} host “{hardware.hostname}”
+              </span>
+              , so the specs below describe that host — not your computer. To benchmark your own
+              hardware, install AI-Bench on your PC and launch it there; the dashboard will then
+              show your CPU, memory and GPU(s).
+            </p>
+          </div>
+        </div>
+      )}
 
       {!hardware ? (
         <Empty>Detecting hardware…</Empty>
