@@ -151,6 +151,22 @@ cd backend && pip install -r requirements.txt pytest && python -m pytest
 cd frontend && npm run build   # type-checks and builds
 ```
 
+## Continuous integration & auto-merge
+
+Every push and pull request runs the **Tests** workflow (`ci.yml`: backend
+`pytest` + frontend type-check/build) and the **Build Windows Installer**
+workflow. Pull requests are kept fully integrated automatically:
+
+- **Auto-merge** (`auto-merge.yml`): once *all* checks on a PR are green, it is
+  squash-merged into `main` and its branch is deleted. Keep a PR in **draft** to
+  hold it; mark it **ready for review** to let it merge.
+- One-time setup: Settings → Actions → General → Workflow permissions →
+  **Read and write permissions** (so the workflow's `GITHUB_TOKEN` may merge).
+
+Tagging a release (`git tag v1.1.0 && git push --tags`) additionally builds and
+publishes the installer to GitHub Releases (`release.yml`), which the in-app
+updater consumes.
+
 ## Configuration
 
 Environment variables (also set by the Windows launcher):

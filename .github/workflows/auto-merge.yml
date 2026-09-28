@@ -1,0 +1,53 @@
+name: Auto-merge
+
+# Keeps the repo fully integrated and tidy: when a pull request's checks are all
+# green, squash-merge it into main and delete its branch — automatically.
+#
+# It triggers after the "Tests" workflow finishes for a PR, waits for *all* of
+# that PR's checks (Tests + Build Windows Installer) to pass, then merges.
+# Draft PRs are skipped, so work-in-progress can be held by keeping a PR in
+# draft and marked ready when it should merge.
+#
+# Requirements (one-time, in repo Settings): Settings → Actions → General →
+# Workflow permissions → "Read and write permissions" so GITHUB_TOKEN may merge.
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: automerge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  automerge:
+    # Only for successful PR runs from branches in this same repository.
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Squash-merge the PR once every check is green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --repo "$REPO" --head "$HEAD_BRANCH" --state open --base main \
+                 --json number,isDraft --jq '.[] | select(.isDraft==false) | .number' | head -n1)
+          if [ -z "${pr:-}" ]; then
+            echo "No open, non-draft PR targeting main for '$HEAD_BRANCH' — nothing to merge."
+            exit 0
+          fi
+          echo "Waiting for all checks on PR #$pr to complete…"
+          # Exits non-zero (failing this job) if any check fails; 0 when all pass.
+          gh pr checks "$pr" --repo "$REPO" --watch --fail-fast --interval 20
+          echo "All checks green — squash-merging PR #$pr and deleting its branch."
+          gh pr merge "$pr" --repo "$REPO" --squash --delete-branch
