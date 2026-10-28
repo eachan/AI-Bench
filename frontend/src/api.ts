@@ -51,6 +51,7 @@ export type Hardware = {
   };
   memory_gb: number;
   gpus: GpuInfo[];
+  packaged?: boolean;
   captured_at: string;
 };
 
