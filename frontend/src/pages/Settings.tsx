@@ -96,30 +96,44 @@ export default function Settings() {
                 </pre>
               )}
 
-              {!applying && status?.status !== "unsupported" && status?.status !== "installing" && (
-                <button className="btn-primary mt-3" onClick={apply}>
-                  <Download size={16} />
-                  {check.packaged ? "Update & restart" : "Download update"}
-                </button>
-              )}
-
-              {status && ["downloading", "installing"].includes(status.status) && (
-                <div className="mt-3">
-                  <div className="mb-1 flex justify-between text-xs text-slate-400">
-                    <span>{status.status === "downloading" ? "Downloading…" : "Installing…"}</span>
-                    <span>{status.percent.toFixed(0)}%</span>
-                  </div>
-                  <ProgressBar value={status.percent} />
+              {check.packaged ? (
+                <>
+                  {!applying && status?.status !== "installing" && (
+                    <button className="btn-primary mt-3" onClick={apply}>
+                      <Download size={16} />
+                      Update &amp; restart
+                    </button>
+                  )}
+                  {status && ["downloading", "installing"].includes(status.status) && (
+                    <div className="mt-3">
+                      <div className="mb-1 flex justify-between text-xs text-slate-400">
+                        <span>{status.status === "downloading" ? "Downloading…" : "Installing…"}</span>
+                        <span>{status.percent.toFixed(0)}%</span>
+                      </div>
+                      <ProgressBar value={status.percent} />
+                    </div>
+                  )}
+                  {status && ["error", "done"].includes(status.status) && (
+                    <p className="mt-3 text-sm text-slate-300">{status.message}</p>
+                  )}
+                </>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <a
+                    className="btn-primary"
+                    href={check.release.installer_url || check.release.url || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Download size={16} />
+                    Download installer
+                  </a>
+                  <p className="text-xs text-slate-500">
+                    You’re running a dev/preview build, so AI-Bench can’t update itself here.
+                    Download and run the installer to update (installed Windows builds update in
+                    place automatically), or in a source checkout update with git.
+                  </p>
                 </div>
-              )}
-              {status && ["unsupported", "error", "done"].includes(status.status) && (
-                <p className="mt-3 text-sm text-slate-300">{status.message}</p>
-              )}
-              {!check.packaged && (
-                <p className="mt-2 text-xs text-slate-500">
-                  Automatic in-place install &amp; restart runs in the installed Windows app; in dev,
-                  update via git.
-                </p>
               )}
             </div>
           ) : check.status === "no_releases" ? (
