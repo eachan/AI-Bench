@@ -66,9 +66,10 @@ snapshot the hardware they ran on.
 
 ### Windows (end users) — wizard installer
 
-1. Download the **distribution file** `AI-Bench-<version>-windows-x64.zip` (from
-   the project's Releases, or the **Build Windows Installer** GitHub Actions run
-   artifacts — it is rebuilt on every change).
+1. Download the **latest build** (always current — refreshed on every merge to
+   `main`):
+   **https://github.com/eachan/AI-Bench/releases/download/latest/AI-Bench-windows-x64.zip**
+   For a specific pinned version, use the [Releases](https://github.com/eachan/AI-Bench/releases) page instead.
 2. Extract it and run **`AI-Bench-Setup.exe`** (a `QUICKSTART.txt` is included).
 3. Click through the wizard (Welcome → License → install location → optional
    desktop shortcut → Install → Finish). No Python, Node, or command line needed.
@@ -163,9 +164,11 @@ workflow. Pull requests are kept fully integrated automatically:
 - One-time setup: Settings → Actions → General → Workflow permissions →
   **Read and write permissions** (so the workflow's `GITHUB_TOKEN` may merge).
 
-Tagging a release (`git tag v1.1.0 && git push --tags`) additionally builds and
-publishes the installer to GitHub Releases (`release.yml`), which the in-app
-updater consumes.
+Every merge to `main` also rebuilds the Windows installer and refreshes a rolling
+**"latest" pre-release** (`latest-build.yml`), so the download link above always
+serves the newest build. Tagging a release (`git tag v1.1.0 && git push --tags`)
+additionally publishes a pinned, versioned release (`release.yml`), which the
+in-app updater consumes.
 
 ## Configuration
 

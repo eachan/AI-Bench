@@ -1,0 +1,81 @@
+name: Latest Windows build
+
+# Keeps a single, always-current Windows download available. On every push to
+# main (i.e. whenever a PR merges) this rebuilds the installer and refreshes a
+# rolling "latest" pre-release, so this stable link always serves the newest build:
+#
+#   https://github.com/eachan/AI-Bench/releases/download/latest/AI-Bench-windows-x64.zip
+#
+# Tagged versioned releases (release.yml) are unaffected; the in-app updater
+# still follows those real versions, not this rolling pre-release.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: latest-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          v=$(python -c "import sys; sys.path.insert(0,'backend'); import aibench; print(aibench.__version__)")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          .\installer\build_installer.ps1 -Version "${{ steps.ver.outputs.version }}"
+
+      - name: Stage stable-named assets
+        shell: pwsh
+        run: |
+          $out = "installer\Output"
+          # Stable, version-independent names so the download link never changes.
+          Copy-Item "$out\AI-Bench-${{ steps.ver.outputs.version }}-windows-x64.zip" "$out\AI-Bench-windows-x64.zip" -Force
+          Get-ChildItem "$out\AI-Bench-windows-x64.zip","$out\AI-Bench-Setup.exe" | Format-Table Name,Length
+
+      - name: Refresh rolling "latest" pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Windows build
+          prerelease: true
+          body: >
+            Rolling build of the latest `main`
+            (version ${{ steps.ver.outputs.version }}, commit ${{ steps.ver.outputs.short_sha }}).
+            Always the newest build — download AI-Bench-windows-x64.zip, extract, and run
+            AI-Bench-Setup.exe. For stable, pinned versions see the tagged releases.
+          files: |
+            installer/Output/AI-Bench-windows-x64.zip
+            installer/Output/AI-Bench-Setup.exe
