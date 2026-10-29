@@ -33,6 +33,28 @@ def _os() -> str:
     return {"Windows": "windows", "Linux": "linux", "Darwin": "macos"}.get(s, "linux")
 
 
+def resolve_variant(requested: str) -> str:
+    """Resolve 'auto' to a concrete llama.cpp build based on detected GPUs.
+
+    A discrete GPU → the Vulkan build (GPU-accelerated, uses the driver's Vulkan
+    runtime, works for NVIDIA/AMD/Intel without a CUDA toolkit). Otherwise CPU.
+    macOS uses the universal build (Metal) so variant is irrelevant there.
+    """
+
+    if requested and requested != "auto":
+        return requested
+    if _os() == "macos":
+        return "cpu"
+    try:
+        from .hardware import detect_gpus
+
+        if detect_gpus():
+            return "vulkan"
+    except Exception:  # noqa: BLE001
+        pass
+    return "cpu"
+
+
 # --------------------------------------------------------------------------- #
 # Asset selection (pure, testable)
 # --------------------------------------------------------------------------- #
@@ -159,6 +181,7 @@ def _copy_tree_contents(src: Path, dst: Path) -> None:
 
 def _install_llama(state: InstallState, variant: str) -> None:
     os_name = _os()
+    variant = resolve_variant(variant)
     state.status = "resolving"
     state.message = f"Finding llama.cpp {variant} build for {os_name}…"
     rel, asset = _latest_release_with_asset(
@@ -257,7 +280,7 @@ def _worker(state: InstallState, kind: str, variant: str) -> None:
         state.message = f"Install failed: {exc}"
 
 
-def start_install(kind: str, variant: str = "cpu") -> InstallState:
+def start_install(kind: str, variant: str = "auto") -> InstallState:
     global _state
     with _lock:
         if _state.status in {"resolving", "downloading", "extracting"}:

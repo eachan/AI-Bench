@@ -102,7 +102,7 @@ async def tools_install(payload: dict) -> dict:
     kind = payload.get("kind")
     if kind not in {"llama-bench", "mlperf"}:
         raise HTTPException(status_code=400, detail="kind must be 'llama-bench' or 'mlperf'")
-    return tools.start_install(kind, payload.get("variant", "cpu")).to_dict()
+    return tools.start_install(kind, payload.get("variant", "auto")).to_dict()
 
 
 @app.get("/api/tools/status")

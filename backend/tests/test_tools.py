@@ -1,5 +1,6 @@
 """Tests for the runtime tool installer's asset selection (pure, no network)."""
 
+from aibench import tools
 from aibench.tools import select_llama_asset, select_mlperf_asset
 
 # Real-world llama.cpp release asset names (rolling b##### builds).
@@ -37,6 +38,17 @@ def test_llama_macos():
 
 def test_llama_no_match_returns_none():
     assert select_llama_asset([{"name": "nightly-tag.txt"}], "windows", "cpu") is None
+
+
+def test_resolve_variant(monkeypatch):
+    # Explicit variant is respected.
+    assert tools.resolve_variant("cuda") == "cuda"
+    # 'auto' → vulkan when a GPU is present, cpu otherwise.
+    monkeypatch.setattr(tools, "_os", lambda: "windows")
+    monkeypatch.setattr("aibench.hardware.detect_gpus", lambda: [object()])
+    assert tools.resolve_variant("auto") == "vulkan"
+    monkeypatch.setattr("aibench.hardware.detect_gpus", lambda: [])
+    assert tools.resolve_variant("auto") == "cpu"
 
 
 def test_mlperf_selection_prefers_cli_over_gui():

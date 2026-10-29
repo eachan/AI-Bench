@@ -206,7 +206,7 @@ export const api = {
     fetch(`/api/models?path=${encodeURIComponent(path)}`, { method: "DELETE" }).then((r) =>
       j<{ deleted: boolean }>(r)
     ),
-  installTool: (kind: string, variant = "cpu") =>
+  installTool: (kind: string, variant = "auto") =>
     fetch("/api/tools/install", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

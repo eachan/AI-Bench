@@ -48,6 +48,18 @@ def test_rows_to_metrics_splits_pp_and_tg():
     assert round(pp.value) == 7264
 
 
+def test_llama_bench_omits_zero_threads():
+    from aibench.runners.llama_bench import LlamaBenchRunner
+
+    runner = LlamaBenchRunner(binary="/fake/llama-bench")
+    # threads=0 means auto — must NOT emit "-t 0" (llama-bench aborts on it).
+    cmd = runner._build_command({"hf_repo": "x/y", "n_prompt": 32, "n_gen": 16, "threads": 0})
+    assert "-t" not in cmd
+    # a positive thread count is passed through
+    cmd2 = runner._build_command({"hf_repo": "x/y", "threads": 4})
+    assert cmd2[cmd2.index("-t") + 1] == "4"
+
+
 def test_parse_llama_bench_json_handles_garbage():
     assert parse_llama_bench_json("not json at all") == []
     assert parse_llama_bench_json("") == []
