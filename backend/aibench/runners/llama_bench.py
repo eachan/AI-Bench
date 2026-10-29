@@ -43,6 +43,61 @@ def parse_llama_bench_json(text: str) -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
+_DEVICE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*\d+):\s*(.+)$")
+
+
+def parse_llama_devices(text: str) -> list[dict[str, str]]:
+    """Parse ``llama-bench --list-devices`` output into GPU device descriptors.
+
+    llama.cpp prints a block like::
+
+        Available devices:
+          CUDA0: NVIDIA GeForce RTX 5090 (32607 MiB, 31800 MiB free)
+          CUDA1: NVIDIA GeForce RTX 3090 (24576 MiB, 24000 MiB free)
+
+    The device ids (``CUDA0``, ``Vulkan1`` ...) are exactly what ``-dev`` accepts.
+    An empty result means llama.cpp sees no GPU backend (e.g. a CPU-only build),
+    which is itself useful to surface in the UI.
+    """
+
+    devices: list[dict[str, str]] = []
+    in_block = False
+    for raw in (text or "").splitlines():
+        s = raw.strip()
+        if not in_block:
+            if s.lower().startswith("available devices"):
+                in_block = True
+            continue
+        if not s:
+            break
+        m = _DEVICE_RE.match(s)
+        if not m:
+            break
+        dev_id, rest = m.group(1), m.group(2).strip()
+        name = re.sub(r"\s*\([^)]*\)\s*$", "", rest).strip() or rest
+        devices.append({"id": dev_id, "name": name, "description": rest})
+    return devices
+
+
+def list_devices(binary: Optional[str] = None) -> list[dict[str, str]]:
+    """Ask the installed ``llama-bench`` which GPU devices it can offload to."""
+
+    binary = binary or config.llama_bench_path()
+    if not binary or not Path(binary).exists():
+        return []
+    try:
+        proc = subprocess.run(
+            [binary, "--list-devices"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return parse_llama_devices((proc.stdout or "") + "\n" + (proc.stderr or ""))
+
+
 def rows_to_metrics(rows: list[dict[str, Any]]) -> tuple[list[Metric], list[str]]:
     metrics: list[Metric] = []
     notes: list[str] = []
@@ -90,8 +145,18 @@ class LlamaBenchRunner(BenchmarkRunner):
             cmd += ["-p", str(int(n_prompt))]
         if n_gen not in (None, ""):
             cmd += ["-n", str(int(n_gen))]
-        if params.get("n_gpu_layers") not in (None, ""):
-            cmd += ["-ngl", str(int(params["n_gpu_layers"]))]
+        # GPU device selection. ``device`` is "" / "auto" (use all GPUs), "cpu"
+        # (force CPU: no offload), or a llama.cpp device id like "CUDA0"/"Vulkan1"
+        # from ``list_devices`` — passed through to ``-dev`` to pin that GPU.
+        device = str(params.get("device", "") or "").strip()
+        cpu_only = device.lower() == "cpu"
+        if device and device.lower() not in ("auto", "cpu"):
+            cmd += ["-dev", device]
+        n_gpu_layers = params.get("n_gpu_layers")
+        if cpu_only:
+            n_gpu_layers = 0
+        if n_gpu_layers not in (None, ""):
+            cmd += ["-ngl", str(int(n_gpu_layers))]
         # threads == 0 means "auto": llama-bench aborts on "-t 0", so omit it and
         # let llama.cpp choose the thread count.
         threads = params.get("threads")

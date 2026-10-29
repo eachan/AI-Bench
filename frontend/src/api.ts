@@ -155,6 +155,12 @@ export type MlperfConfig = {
   incompatible?: boolean;
 };
 
+export type LlamaDevice = {
+  id: string;
+  name: string;
+  description: string;
+};
+
 export type ProgressEvent = {
   type: "progress" | "log" | "status" | "metric";
   run_id: string;
@@ -180,6 +186,8 @@ export const api = {
     fetch("/api/mlperf/configs").then((r) =>
       j<{ home: string | null; gpu_vendors?: string[]; configs: MlperfConfig[] }>(r)
     ),
+  llamaDevices: () =>
+    fetch("/api/llama/devices").then((r) => j<{ devices: LlamaDevice[] }>(r)),
   runs: () => fetch("/api/runs").then((r) => j<RunResult[]>(r)),
   run: (id: string) => fetch(`/api/runs/${id}`).then((r) => j<RunResult>(r)),
   createRun: (body: { benchmark_id: string; label?: string; params: Record<string, unknown> }) =>

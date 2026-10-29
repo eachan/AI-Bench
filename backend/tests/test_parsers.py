@@ -3,7 +3,12 @@
 import json
 from pathlib import Path
 
-from aibench.runners.llama_bench import parse_llama_bench_json, rows_to_metrics
+from aibench.runners.llama_bench import (
+    LlamaBenchRunner,
+    parse_llama_bench_json,
+    parse_llama_devices,
+    rows_to_metrics,
+)
 from aibench.runners.mlperf import (
     build_mlperf_config,
     discover_stock_configs,
@@ -111,6 +116,45 @@ def test_mlperf_stock_config_discovery_and_selection(tmp_path: Path):
     assert chosen and chosen.endswith("Intel_NativeOpenVINO_GPU_Default.json")
 
     assert discover_stock_configs(None) == []
+
+
+def test_parse_llama_devices_reads_available_devices_block():
+    text = (
+        "ggml_cuda_init: found 2 CUDA devices:\n"
+        "Available devices:\n"
+        "  CUDA0: NVIDIA GeForce RTX 5090 (32607 MiB, 31800 MiB free)\n"
+        "  CUDA1: NVIDIA GeForce RTX 3090 (24576 MiB, 24000 MiB free)\n"
+        "\n"
+        "load time ...\n"
+    )
+    devices = parse_llama_devices(text)
+    assert [d["id"] for d in devices] == ["CUDA0", "CUDA1"]
+    assert devices[0]["name"] == "NVIDIA GeForce RTX 5090"
+    assert "32607 MiB" in devices[0]["description"]
+    # A CPU-only build lists no devices.
+    assert parse_llama_devices("Available devices:\n") == []
+    assert parse_llama_devices("") == []
+
+
+def test_build_command_honours_device_selection():
+    runner = LlamaBenchRunner(binary="/fake/llama-bench")
+    base = {"hf_repo": "ggml-org/x", "n_gpu_layers": 999}
+
+    # A specific GPU is pinned with -dev and still offloads layers.
+    cmd = runner._build_command({**base, "device": "CUDA1"})
+    assert "-dev" in cmd and cmd[cmd.index("-dev") + 1] == "CUDA1"
+    assert "-ngl" in cmd and cmd[cmd.index("-ngl") + 1] == "999"
+
+    # CPU only forces -ngl 0 and never pins a device.
+    cmd = runner._build_command({**base, "device": "cpu"})
+    assert "-dev" not in cmd
+    assert cmd[cmd.index("-ngl") + 1] == "0"
+
+    # Auto / empty uses no -dev (llama.cpp uses all GPUs).
+    for dev in ("", "auto"):
+        cmd = runner._build_command({**base, "device": dev})
+        assert "-dev" not in cmd
+        assert cmd[cmd.index("-ngl") + 1] == "999"
 
 
 def test_select_stock_config_is_hardware_aware():

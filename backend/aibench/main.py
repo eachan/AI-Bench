@@ -130,6 +130,15 @@ async def mlperf_configs() -> dict:
     return {"home": home, "gpu_vendors": sorted(vendors), "configs": configs}
 
 
+@app.get("/api/llama/devices")
+async def llama_devices() -> dict:
+    """List the GPU devices llama.cpp can offload to, for the device picker."""
+
+    from .runners.llama_bench import list_devices
+
+    return {"devices": list_devices()}
+
+
 # --------------------------------------------------------------------------- #
 # Runs
 # --------------------------------------------------------------------------- #

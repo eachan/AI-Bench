@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, ChevronDown, Download, FileCog, Play, Settings2, StopCircle } from "lucide-react";
-import { api, Benchmark, InstallStatus, LocalModel, MlperfConfig, RunResult } from "../api";
+import { Boxes, ChevronDown, Cpu, Download, FileCog, Play, Settings2, StopCircle } from "lucide-react";
+import { api, Benchmark, InstallStatus, LlamaDevice, LocalModel, MlperfConfig, RunResult } from "../api";
 import { Link } from "react-router-dom";
 import { Card, Empty, ProgressBar, SectionTitle, StatusBadge } from "../components/ui";
 import ParamControl from "../components/ParamControl";
@@ -192,10 +192,16 @@ export default function Tests({
               )}
 
               {selected.engine === "llama-bench" && (
-                <LlamaModelPicker
-                  value={(params.model_path as string) || ""}
-                  onChange={(path) => setParams((prev) => ({ ...prev, model_path: path }))}
-                />
+                <>
+                  <LlamaModelPicker
+                    value={(params.model_path as string) || ""}
+                    onChange={(path) => setParams((prev) => ({ ...prev, model_path: path }))}
+                  />
+                  <LlamaDevicePicker
+                    value={(params.device as string) || ""}
+                    onChange={(dev) => setParams((prev) => ({ ...prev, device: dev }))}
+                  />
+                </>
               )}
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -412,6 +418,66 @@ function LlamaModelPicker({
           </>
         )}
       </p>
+    </div>
+  );
+}
+
+function LlamaDevicePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (device: string) => void;
+}) {
+  const [devices, setDevices] = useState<LlamaDevice[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .llamaDevices()
+      .then((r) => alive && setDevices(r.devices))
+      .catch(() => alive && setDevices([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const hasGpu = (devices ?? []).length > 0;
+
+  return (
+    <div className="mb-4 rounded-xl border border-white/10 bg-slate-900/40 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <Cpu size={15} className="text-brand-400" />
+        <label className="label !normal-case !tracking-normal text-slate-200">Run device</label>
+      </div>
+      {devices === null ? (
+        <p className="text-xs text-slate-500">Detecting GPUs visible to llama.cpp…</p>
+      ) : (
+        <>
+          <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">{hasGpu ? "Auto — use all available GPUs" : "Auto"}</option>
+            {hasGpu && (
+              <optgroup label="GPUs">
+                {devices!.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id} · {d.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <option value="cpu">CPU only</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            {value === "cpu"
+              ? "Forcing CPU execution (no GPU offload)."
+              : value
+              ? `Pinning this run to ${value}; GPU layers are offloaded to it.`
+              : hasGpu
+              ? `${devices!.length} GPU${devices!.length > 1 ? "s" : ""} detected — pick one to pin the run, or let llama.cpp use all.`
+              : "llama.cpp reports no GPU devices here, so runs use the CPU. If you have a GPU, reinstall the GPU (CUDA/Vulkan) build of llama.cpp from the Tests page."}
+          </p>
+        </>
+      )}
     </div>
   );
 }
