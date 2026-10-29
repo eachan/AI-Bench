@@ -27,6 +27,14 @@ export type Benchmark = {
   requires_binary: boolean;
   available: boolean;
   unavailable_reason?: string | null;
+  installable: boolean;
+};
+
+export type InstallStatus = {
+  kind: string;
+  status: "idle" | "resolving" | "downloading" | "extracting" | "done" | "error";
+  percent: number;
+  message?: string | null;
 };
 
 export type GpuInfo = {
@@ -198,6 +206,13 @@ export const api = {
     fetch(`/api/models?path=${encodeURIComponent(path)}`, { method: "DELETE" }).then((r) =>
       j<{ deleted: boolean }>(r)
     ),
+  installTool: (kind: string, variant = "cpu") =>
+    fetch("/api/tools/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, variant }),
+    }).then((r) => j<InstallStatus>(r)),
+  toolStatus: () => fetch("/api/tools/status").then((r) => j<InstallStatus>(r)),
   checkUpdate: () => fetch("/api/update/check").then((r) => j<UpdateCheck>(r)),
   applyUpdate: () =>
     fetch("/api/update/apply", { method: "POST" }).then((r) => j<UpdateStatus>(r)),

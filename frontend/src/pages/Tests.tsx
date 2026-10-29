@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, ChevronDown, FileCog, Play, Settings2, StopCircle } from "lucide-react";
-import { api, Benchmark, LocalModel, MlperfConfig, RunResult } from "../api";
+import { Boxes, ChevronDown, Download, FileCog, Play, Settings2, StopCircle } from "lucide-react";
+import { api, Benchmark, InstallStatus, LocalModel, MlperfConfig, RunResult } from "../api";
 import { Link } from "react-router-dom";
 import { Card, Empty, ProgressBar, SectionTitle, StatusBadge } from "../components/ui";
 import ParamControl from "../components/ParamControl";
@@ -17,16 +17,19 @@ export default function Tests({
   benchmarks,
   runs,
   onRunsChanged,
+  onBenchmarksChanged,
 }: {
   benchmarks: Benchmark[];
   runs: RunResult[];
   onRunsChanged: () => void;
+  onBenchmarksChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [label, setLabel] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [install, setInstall] = useState<InstallStatus | null>(null);
 
   const selected = useMemo(
     () => benchmarks.find((b) => b.id === selectedId) ?? null,
@@ -47,6 +50,28 @@ export default function Tests({
   }, [selected]);
 
   const activeRun = runs.find((r) => r.status === "running" || r.status === "queued");
+
+  const installing = install
+    ? ["resolving", "downloading", "extracting"].includes(install.status)
+    : false;
+
+  const installEngine = async () => {
+    if (!selected) return;
+    const s = await api.installTool(selected.engine);
+    setInstall(s);
+    const poll = setInterval(async () => {
+      try {
+        const st = await api.toolStatus();
+        setInstall(st);
+        if (!["resolving", "downloading", "extracting"].includes(st.status)) {
+          clearInterval(poll);
+          if (st.status === "done") onBenchmarksChanged();
+        }
+      } catch {
+        clearInterval(poll);
+      }
+    }, 1000);
+  };
 
   const start = async () => {
     if (!selected) return;
@@ -125,9 +150,32 @@ export default function Tests({
                 <Settings2 size={18} className="shrink-0 text-slate-500" />
               </div>
 
-              {!selected.available && selected.unavailable_reason && (
+              {!selected.available && (
                 <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
-                  {selected.unavailable_reason}
+                  <p>{selected.unavailable_reason}</p>
+                  {selected.installable && (
+                    <div className="mt-2">
+                      {!installing && install?.status !== "done" && (
+                        <button className="btn-primary !py-1.5 !text-xs" onClick={installEngine}>
+                          <Download size={14} />
+                          Install {selected.engine}
+                        </button>
+                      )}
+                      {install && installing && (
+                        <div>
+                          <div className="mb-1 flex justify-between">
+                            <span>{install.message ?? install.status}</span>
+                            <span>{install.percent.toFixed(0)}%</span>
+                          </div>
+                          <ProgressBar value={install.percent} />
+                        </div>
+                      )}
+                      {install?.status === "done" && (
+                        <p className="text-emerald-300">Installed — you can run the benchmark now.</p>
+                      )}
+                      {install?.status === "error" && <p className="text-rose-300">{install.message}</p>}
+                    </div>
+                  )}
                 </div>
               )}
 
