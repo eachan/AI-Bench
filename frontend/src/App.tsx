@@ -37,6 +37,10 @@ export default function App() {
     setRuns(await api.runs());
   }, []);
 
+  const refreshBenchmarks = useCallback(async () => {
+    setBenchmarks(await api.benchmarks());
+  }, []);
+
   useEffect(() => {
     api.hardware().then(setHardware).catch(() => undefined);
     api.benchmarks().then(setBenchmarks).catch(() => undefined);
@@ -138,6 +142,7 @@ export default function App() {
                   benchmarks={benchmarks}
                   runs={runs}
                   onRunsChanged={refreshRuns}
+                  onBenchmarksChanged={refreshBenchmarks}
                 />
               }
             />

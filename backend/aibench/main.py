@@ -95,13 +95,31 @@ async def benchmark(benchmark_id: str) -> dict:
     return defn.model_dump()
 
 
+@app.post("/api/tools/install")
+async def tools_install(payload: dict) -> dict:
+    from . import tools
+
+    kind = payload.get("kind")
+    if kind not in {"llama-bench", "mlperf"}:
+        raise HTTPException(status_code=400, detail="kind must be 'llama-bench' or 'mlperf'")
+    return tools.start_install(kind, payload.get("variant", "auto")).to_dict()
+
+
+@app.get("/api/tools/status")
+async def tools_status() -> dict:
+    from . import tools
+
+    return tools.get_state().to_dict()
+
+
 @app.get("/api/mlperf/configs")
 async def mlperf_configs() -> dict:
     """List the MLPerf Client's bundled stock scenario configs (if installed)."""
 
     from .runners.mlperf import discover_stock_configs
 
-    return {"home": config.MLPERF_HOME, "configs": discover_stock_configs(config.MLPERF_HOME)}
+    home = config.mlperf_home()
+    return {"home": home, "configs": discover_stock_configs(home)}
 
 
 # --------------------------------------------------------------------------- #

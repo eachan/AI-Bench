@@ -196,7 +196,7 @@ class MLPerfRunner(BenchmarkRunner):
     engine = "mlperf"
 
     def __init__(self, binary: Optional[str] = None) -> None:
-        self.binary = binary or config.MLPERF_CLIENT_PATH
+        self.binary = binary or config.mlperf_client_path()
 
     def run(self, handle: RunHandle, progress: ProgressCallback) -> RunOutput:
         if not self.binary or not Path(self.binary).exists():
@@ -214,7 +214,7 @@ class MLPerfRunner(BenchmarkRunner):
         # schema validation rejects incomplete configs.
         cfg_path = p.get("config_path")
         if not cfg_path:
-            stock = discover_stock_configs(config.MLPERF_HOME)
+            stock = discover_stock_configs(config.mlperf_home())
             cfg_path = select_stock_config(stock, p)
             if cfg_path:
                 out.logs.append(f"Using stock MLPerf config: {cfg_path}")
@@ -244,7 +244,8 @@ class MLPerfRunner(BenchmarkRunner):
         progress("Starting", 0.0, "Launching MLPerf Client")
 
         # Run from the MLPerf home dir so its execution-provider plugins resolve.
-        cwd = config.MLPERF_HOME if config.MLPERF_HOME else None
+        mlperf_root = config.mlperf_home()
+        cwd = mlperf_root if mlperf_root else None
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd
         )

@@ -74,7 +74,7 @@ class LlamaBenchRunner(BenchmarkRunner):
     engine = "llama-bench"
 
     def __init__(self, binary: Optional[str] = None) -> None:
-        self.binary = binary or config.LLAMA_BENCH_PATH
+        self.binary = binary or config.llama_bench_path()
 
     def _build_command(self, params: dict[str, Any]) -> list[str]:
         cmd: list[str] = [self.binary, "-o", "json", "--progress"]
@@ -92,8 +92,11 @@ class LlamaBenchRunner(BenchmarkRunner):
             cmd += ["-n", str(int(n_gen))]
         if params.get("n_gpu_layers") not in (None, ""):
             cmd += ["-ngl", str(int(params["n_gpu_layers"]))]
-        if params.get("threads") not in (None, ""):
-            cmd += ["-t", str(int(params["threads"]))]
+        # threads == 0 means "auto": llama-bench aborts on "-t 0", so omit it and
+        # let llama.cpp choose the thread count.
+        threads = params.get("threads")
+        if threads not in (None, "") and int(threads) > 0:
+            cmd += ["-t", str(int(threads))]
         if params.get("batch_size") not in (None, ""):
             cmd += ["-b", str(int(params["batch_size"]))]
         if params.get("repetitions") not in (None, ""):

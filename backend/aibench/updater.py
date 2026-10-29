@@ -109,10 +109,10 @@ def bundled_components() -> list[dict]:
         except Exception:  # noqa: BLE001
             pass
     comps.append(
-        {"name": "llama.cpp (llama-bench)", "version": "bundled" if config.LLAMA_BENCH_PATH else "not installed"}
+        {"name": "llama.cpp (llama-bench)", "version": "installed" if config.llama_bench_path() else "not installed"}
     )
     comps.append(
-        {"name": "MLPerf Client", "version": "bundled" if config.MLPERF_CLIENT_PATH else "not installed"}
+        {"name": "MLPerf Client", "version": "installed" if config.mlperf_client_path() else "not installed"}
     )
     return comps
 
