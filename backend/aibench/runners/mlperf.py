@@ -70,14 +70,49 @@ def discover_stock_configs(home: Optional[str]) -> list[dict[str, Any]]:
     return configs
 
 
-def select_stock_config(configs: list[dict[str, Any]], params: dict[str, Any]) -> Optional[str]:
-    """Pick the stock config that best matches the requested scenario/EP/device."""
+def vendor_fit(ep: str, name: str, vendors: set[str]) -> int:
+    """Score how well a config's execution provider fits the detected GPU vendor(s).
+
+    Positive = a good match (e.g. CUDA/TensorRT on NVIDIA); strongly negative =
+    incompatible (e.g. an Intel OpenVINO GPU config on an NVIDIA-only machine,
+    which can't run and produces no results).
+    """
+
+    s = (ep + " " + name).lower()
+    score = 0
+    if "nvidia" in vendors:
+        if any(k in s for k in ("nvidia", "cuda", "tensorrt")):
+            score += 3
+        if "openvino" in s:
+            score -= 5
+    if "amd" in vendors:
+        if any(k in s for k in ("amd", "rocm", "ryzenai")):
+            score += 3
+        if "openvino" in s:
+            score -= 3
+    if "intel" in vendors:
+        if any(k in s for k in ("intel", "openvino")):
+            score += 3
+    # llama.cpp and DirectML (WindowsML-DML) run broadly across vendors.
+    if any(k in s for k in ("llama-cpp", "llamacpp")) or "dml" in s:
+        score += 1
+    return score
+
+
+def select_stock_config(
+    configs: list[dict[str, Any]],
+    params: dict[str, Any],
+    vendors: Optional[set[str]] = None,
+) -> Optional[str]:
+    """Pick the stock config that best matches the requested scenario/EP/device
+    and the detected GPU vendor(s)."""
 
     if not configs:
         return None
     scenario = str(params.get("scenario", "")).lower()
     backend = str(params.get("backend", "")).lower()
     device = str(params.get("device_type", "")).lower()
+    vendors = vendors or set()
 
     def score(c: dict[str, Any]) -> int:
         s = 0
@@ -87,10 +122,15 @@ def select_stock_config(configs: list[dict[str, Any]], params: dict[str, Any]) -
             s += 4
         if device and device == c["device"].lower():
             s += 3
+        s += vendor_fit(c["ep"], c["name"], vendors)
         return s
 
     ranked = sorted(configs, key=score, reverse=True)
-    return ranked[0]["path"] if ranked else None
+    best = ranked[0]
+    # Don't auto-pick a config that's incompatible with the hardware.
+    if vendors and vendor_fit(best["ep"], best["name"], vendors) < 0:
+        return None
+    return best["path"]
 
 
 def build_mlperf_config(params: dict[str, Any]) -> dict[str, Any]:
@@ -214,8 +254,11 @@ class MLPerfRunner(BenchmarkRunner):
         # schema validation rejects incomplete configs.
         cfg_path = p.get("config_path")
         if not cfg_path:
+            from ..hardware import detect_gpus
+
+            vendors = {(g.vendor or "").lower() for g in detect_gpus() if g.vendor}
             stock = discover_stock_configs(config.mlperf_home())
-            cfg_path = select_stock_config(stock, p)
+            cfg_path = select_stock_config(stock, p, vendors)
             if cfg_path:
                 out.logs.append(f"Using stock MLPerf config: {cfg_path}")
         if not cfg_path:
@@ -249,6 +292,7 @@ class MLPerfRunner(BenchmarkRunner):
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd
         )
+        proc_output: list[str] = []
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -258,17 +302,27 @@ class MLPerfRunner(BenchmarkRunner):
                 line = line.rstrip()
                 if line:
                     out.logs.append(line)
+                    proc_output.append(line)
                     progress("Benchmarking", None, line)
             proc.wait(timeout=10)
         finally:
             if proc.poll() is None:
                 proc.kill()
 
+        def _tail(n: int = 12) -> str:
+            tail = [ln for ln in proc_output if ln.strip()][-n:]
+            return ("\n  " + "\n  ".join(tail)) if tail else " (no output captured)"
+
         if proc.returncode not in (0, None):
-            raise RuntimeError(f"MLPerf Client exited with code {proc.returncode}")
+            raise RuntimeError(f"MLPerf Client exited with code {proc.returncode}. Output:{_tail()}")
 
         if not results_csv.exists():
-            raise RuntimeError("MLPerf Client did not produce a results CSV")
+            raise RuntimeError(
+                "MLPerf Client finished without producing results. This usually means the "
+                "chosen config's execution provider isn't available on this hardware (e.g. an "
+                "Intel OpenVINO config on an NVIDIA GPU) or required model files couldn't be "
+                f"downloaded. MLPerf output:{_tail()}"
+            )
         metrics, notes = parse_mlperf_csv(results_csv.read_text(encoding="utf-8", errors="ignore"))
         out.metrics.extend(metrics)
         out.logs.extend(notes)

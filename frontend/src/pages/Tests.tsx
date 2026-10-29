@@ -255,8 +255,10 @@ export default function Tests({
 
 function configLabel(c: MlperfConfig): string {
   const scenario = c.scenario || c.name;
-  const parts = [scenario, c.ep, c.device].filter(Boolean);
-  return parts.join(" · ") || c.name;
+  const base = [scenario, c.ep, c.device].filter(Boolean).join(" · ") || c.name;
+  if (c.recommended) return `${base}  ✓ recommended`;
+  if (c.incompatible) return `${base}  (not for your GPU)`;
+  return base;
 }
 
 function MlperfConfigPicker({
@@ -267,7 +269,7 @@ function MlperfConfigPicker({
   onChange: (path: string) => void;
 }) {
   const [configs, setConfigs] = useState<MlperfConfig[] | null>(null);
-  const [home, setHome] = useState<string | null>(null);
+  const [vendors, setVendors] = useState<string[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -276,7 +278,7 @@ function MlperfConfigPicker({
       .then((r) => {
         if (!alive) return;
         setConfigs(r.configs);
-        setHome(r.home);
+        setVendors(r.gpu_vendors ?? []);
       })
       .catch(() => alive && setConfigs([]));
     return () => {
@@ -284,15 +286,24 @@ function MlperfConfigPicker({
     };
   }, []);
 
-  // Group discovered configs by their top-level category for readable optgroups.
+  // Group by category; within each group show recommended first, incompatible last.
   const groups = useMemo(() => {
     const g: Record<string, MlperfConfig[]> = {};
     (configs ?? []).forEach((c) => {
       const key = c.category || "other";
       (g[key] ||= []).push(c);
     });
+    Object.values(g).forEach((list) =>
+      list.sort(
+        (a, b) =>
+          Number(Boolean(b.recommended)) - Number(Boolean(a.recommended)) ||
+          Number(Boolean(a.incompatible)) - Number(Boolean(b.incompatible))
+      )
+    );
     return g;
   }, [configs]);
+
+  const selectedCfg = (configs ?? []).find((c) => c.path === value);
 
   return (
     <div className="mb-4 rounded-xl border border-white/10 bg-slate-900/40 p-3">
@@ -326,8 +337,16 @@ function MlperfConfigPicker({
           <p className="mt-1 text-xs text-slate-500">
             {value
               ? "Using the selected stock config; its scenario, provider and iterations are applied as-is."
-              : `${configs.length} stock configs available${home ? ` in ${home}` : ""}.`}
+              : `${configs.length} stock configs available${
+                  vendors.length ? ` · recommended for your ${vendors.join("/")} GPU are marked ✓` : ""
+                }.`}
           </p>
+          {selectedCfg?.incompatible && (
+            <p className="mt-1 text-xs text-amber-300">
+              This config targets a different GPU vendor than your {vendors.join("/")} GPU, so
+              MLPerf likely won’t produce results. Pick a ✓ recommended config instead.
+            </p>
+          )}
         </>
       )}
     </div>

@@ -151,6 +151,8 @@ export type MlperfConfig = {
   scenario: string;
   ep: string;
   device: string;
+  recommended?: boolean;
+  incompatible?: boolean;
 };
 
 export type ProgressEvent = {
@@ -176,7 +178,7 @@ export const api = {
   benchmarks: () => fetch("/api/benchmarks").then((r) => j<Benchmark[]>(r)),
   mlperfConfigs: () =>
     fetch("/api/mlperf/configs").then((r) =>
-      j<{ home: string | null; configs: MlperfConfig[] }>(r)
+      j<{ home: string | null; gpu_vendors?: string[]; configs: MlperfConfig[] }>(r)
     ),
   runs: () => fetch("/api/runs").then((r) => j<RunResult[]>(r)),
   run: (id: string) => fetch(`/api/runs/${id}`).then((r) => j<RunResult>(r)),
