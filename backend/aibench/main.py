@@ -116,10 +116,18 @@ async def tools_status() -> dict:
 async def mlperf_configs() -> dict:
     """List the MLPerf Client's bundled stock scenario configs (if installed)."""
 
-    from .runners.mlperf import discover_stock_configs
+    from .runners.mlperf import discover_stock_configs, vendor_fit
 
     home = config.mlperf_home()
-    return {"home": home, "configs": discover_stock_configs(home)}
+    vendors = {(g.vendor or "").lower() for g in detect_hardware().gpus if g.vendor}
+    configs = discover_stock_configs(home)
+    for c in configs:
+        # Recommended when its execution provider is compatible with the GPU(s);
+        # incompatible (negative fit) configs are flagged so the UI can warn.
+        fit = vendor_fit(c.get("ep", ""), c.get("name", ""), vendors)
+        c["recommended"] = bool(vendors) and fit > 0
+        c["incompatible"] = bool(vendors) and fit < 0
+    return {"home": home, "gpu_vendors": sorted(vendors), "configs": configs}
 
 
 # --------------------------------------------------------------------------- #

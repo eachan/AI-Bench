@@ -113,6 +113,27 @@ def test_mlperf_stock_config_discovery_and_selection(tmp_path: Path):
     assert discover_stock_configs(None) == []
 
 
+def test_select_stock_config_is_hardware_aware():
+    from aibench.runners.mlperf import vendor_fit
+
+    configs = [
+        {"path": "/x/NVIDIA_llamacpp-CUDA_GPU.json", "name": "NVIDIA_llamacpp-CUDA_GPU",
+         "category": "llm", "scenario": "Llama3", "ep": "llama-cpp", "device": "GPU"},
+        {"path": "/x/Intel_NativeOpenVINO_GPU.json", "name": "Intel_NativeOpenVINO_GPU",
+         "category": "llm", "scenario": "Llama3", "ep": "NativeOpenVINO", "device": "GPU"},
+    ]
+    params = {"scenario": "Llama3", "backend": "llama-cpp", "device_type": "GPU"}
+    # On an NVIDIA machine, the CUDA config wins and OpenVINO is not auto-picked.
+    chosen = select_stock_config(configs, params, vendors={"nvidia"})
+    assert chosen.endswith("NVIDIA_llamacpp-CUDA_GPU.json")
+    # vendor_fit flags the OpenVINO GPU config as incompatible on NVIDIA.
+    assert vendor_fit("NativeOpenVINO", "Intel_NativeOpenVINO_GPU", {"nvidia"}) < 0
+    assert vendor_fit("llama-cpp", "NVIDIA_llamacpp-CUDA_GPU", {"nvidia"}) > 0
+    # If only an incompatible config exists, Auto declines to pick it.
+    only_openvino = [configs[1]]
+    assert select_stock_config(only_openvino, params, vendors={"nvidia"}) is None
+
+
 def test_parse_mlperf_csv_detects_metrics():
     csv_text = (
         "Scenario,Tokens per second,TTFT (ms),Total latency (ms)\n"
