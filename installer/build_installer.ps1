@@ -95,13 +95,18 @@ if (-not $SkipLlamaCpp) {
     try {
         New-Item -ItemType Directory -Force -Path $StageBin | Out-Null
         # llama.cpp ships Windows binaries on rolling 'b#####' prereleases, not
-        # 'releases/latest'. Scan recent releases for the CPU x64 llama-bench zip
-        # (exclude the cudart-only archives).
+        # 'releases/latest'. Bundle the Vulkan build so llama.cpp is GPU-accelerated
+        # out of the box (works on NVIDIA/AMD/Intel via the driver's Vulkan runtime,
+        # no CUDA toolkit needed); fall back to the CPU build if Vulkan is missing.
+        # Users can switch builds later from the app (Tests -> Run device).
         $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15" `
             -Headers @{ "User-Agent" = "AI-Bench-Build" }
         $asset = $null
         foreach ($r in $releases) {
-            $asset = $r.assets | Where-Object { $_.name -like "llama-*bin-win-cpu-x64.zip" } | Select-Object -First 1
+            $asset = $r.assets | Where-Object { $_.name -like "llama-*bin-win-vulkan-x64.zip" } | Select-Object -First 1
+            if (-not $asset) {
+                $asset = $r.assets | Where-Object { $_.name -like "llama-*bin-win-cpu-x64.zip" } | Select-Object -First 1
+            }
             if ($asset) { break }
         }
         if ($asset) {
