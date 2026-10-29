@@ -94,9 +94,16 @@ if (-not $SkipLlamaCpp) {
     Write-Step "Downloading llama.cpp (llama-bench) to bundle"
     try {
         New-Item -ItemType Directory -Force -Path $StageBin | Out-Null
-        $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" `
+        # llama.cpp ships Windows binaries on rolling 'b#####' prereleases, not
+        # 'releases/latest'. Scan recent releases for the CPU x64 llama-bench zip
+        # (exclude the cudart-only archives).
+        $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15" `
             -Headers @{ "User-Agent" = "AI-Bench-Build" }
-        $asset = $rel.assets | Where-Object { $_.name -match "win.*x64.*\.zip$" } | Select-Object -First 1
+        $asset = $null
+        foreach ($r in $releases) {
+            $asset = $r.assets | Where-Object { $_.name -like "llama-*bin-win-cpu-x64.zip" } | Select-Object -First 1
+            if ($asset) { break }
+        }
         if ($asset) {
             $zip = Join-Path $env:TEMP $asset.name
             Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -UseBasicParsing
