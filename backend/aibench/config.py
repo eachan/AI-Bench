@@ -35,15 +35,21 @@ BIN_DIR = DATA_DIR / "bin"
 DB_PATH = DATA_DIR / "aibench.db"
 
 def _bin_roots() -> list[Path]:
-    """Candidate ``bin/`` roots for benchmark binaries bundled with a packaged
-    (PyInstaller) app: next to the executable, its ``_internal`` dir, and the
-    ``_MEIPASS`` temp dir."""
+    """Candidate ``bin/`` roots for benchmark binaries, in priority order:
 
-    exe_dir = Path(sys.executable).resolve().parent
-    roots = [exe_dir / "bin", exe_dir / "_internal" / "bin"]
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        roots.append(Path(meipass) / "bin")
+    * ``BIN_DIR`` — tools installed at runtime (via the in-app installer); works
+      in both dev and packaged apps.
+    * for a packaged (PyInstaller) app: next to the executable, its
+      ``_internal`` dir, and the ``_MEIPASS`` temp dir (bundled by the installer).
+    """
+
+    roots = [BIN_DIR]
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        roots += [exe_dir / "bin", exe_dir / "_internal" / "bin"]
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            roots.append(Path(meipass) / "bin")
     return roots
 
 
@@ -58,16 +64,6 @@ def _search_bin(patterns: list[str]) -> str | None:
     return None
 
 
-def _resolve_binary(env_var: str, patterns: list[str]) -> str | None:
-    override = os.environ.get(env_var)
-    if override:
-        return override
-    # Only auto-discover bundled binaries in a packaged app.
-    if not getattr(sys, "frozen", False):
-        return None
-    return _search_bin(patterns)
-
-
 _EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 
 if os.name == "nt":
@@ -75,17 +71,26 @@ if os.name == "nt":
 else:
     _MLPERF_PATTERNS = ["mlperf-linux", "mlperf-macos", "mlperf"]
 
-# Optional paths to external benchmark binaries. The Windows installer bundles
-# these; when unset the app falls back to the built-in synthetic benchmarks so
-# it is always usable out of the box.
-LLAMA_BENCH_PATH = _resolve_binary("AIBENCH_LLAMA_BENCH", [f"llama-bench{_EXE_SUFFIX}"])
-MLPERF_CLIENT_PATH = _resolve_binary("AIBENCH_MLPERF_CLIENT", _MLPERF_PATTERNS)
 
-# Directory that holds the MLPerf Client's stock scenario configs (llm/,
-# agentic/, image-gen/). These ship next to the binary. Overridable for dev.
-MLPERF_HOME = os.environ.get("AIBENCH_MLPERF_HOME") or (
-    str(Path(MLPERF_CLIENT_PATH).resolve().parent) if MLPERF_CLIENT_PATH else None
-)
+# Resolve external benchmark binaries dynamically so a tool installed at runtime
+# (into BIN_DIR) is picked up immediately, without restarting. An explicit env
+# override always wins. When nothing is found the app still runs its built-in
+# synthetic benchmark.
+def llama_bench_path() -> str | None:
+    return os.environ.get("AIBENCH_LLAMA_BENCH") or _search_bin([f"llama-bench{_EXE_SUFFIX}"])
+
+
+def mlperf_client_path() -> str | None:
+    return os.environ.get("AIBENCH_MLPERF_CLIENT") or _search_bin(_MLPERF_PATTERNS)
+
+
+def mlperf_home() -> str | None:
+    """Directory holding the MLPerf stock scenario configs (next to its binary)."""
+    env = os.environ.get("AIBENCH_MLPERF_HOME")
+    if env:
+        return env
+    binary = mlperf_client_path()
+    return str(Path(binary).resolve().parent) if binary else None
 
 
 def ensure_dirs() -> None:

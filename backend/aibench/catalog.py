@@ -123,14 +123,15 @@ def _mlperf() -> BenchmarkDefinition:
 def _resolve_availability(defn: BenchmarkDefinition) -> BenchmarkDefinition:
     if not defn.requires_binary:
         return defn
-    binary = config.LLAMA_BENCH_PATH if defn.engine == "llama-bench" else config.MLPERF_CLIENT_PATH
+    binary = config.llama_bench_path() if defn.engine == "llama-bench" else config.mlperf_client_path()
     if binary and Path(binary).exists():
         defn.available = True
     else:
         defn.available = False
+        defn.installable = defn.engine in ("llama-bench", "mlperf")
         defn.unavailable_reason = (
-            f"{defn.name} needs an external binary. Install it from the Settings "
-            "page or via the installer; synthetic benchmarks work without it."
+            f"{defn.name} needs its benchmark engine installed. Click Install to "
+            "download it automatically; synthetic benchmarks work without it."
         )
     return defn
 

@@ -83,6 +83,9 @@ class BenchmarkDefinition(BaseModel):
     requires_binary: bool = False
     available: bool = True
     unavailable_reason: Optional[str] = None
+    # When unavailable, the engine's binary can be installed on demand via
+    # POST /api/tools/install (kind == engine).
+    installable: bool = False
 
 
 # --------------------------------------------------------------------------- #

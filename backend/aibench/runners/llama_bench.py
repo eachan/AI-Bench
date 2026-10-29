@@ -74,7 +74,7 @@ class LlamaBenchRunner(BenchmarkRunner):
     engine = "llama-bench"
 
     def __init__(self, binary: Optional[str] = None) -> None:
-        self.binary = binary or config.LLAMA_BENCH_PATH
+        self.binary = binary or config.llama_bench_path()
 
     def _build_command(self, params: dict[str, Any]) -> list[str]:
         cmd: list[str] = [self.binary, "-o", "json", "--progress"]
