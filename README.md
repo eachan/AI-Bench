@@ -68,7 +68,7 @@ snapshot the hardware they ran on.
 
 1. Download the **latest build** (always current — refreshed on every merge to
    `main`):
-   **https://github.com/eachan/AI-Bench/releases/download/latest/AI-Bench-windows-x64.zip**
+   **https://github.com/eachan/AI-Bench/releases/latest/download/AI-Bench-windows-x64.zip**
    For a specific pinned version, use the [Releases](https://github.com/eachan/AI-Bench/releases) page instead.
 2. Extract it and run **`AI-Bench-Setup.exe`** (a `QUICKSTART.txt` is included).
 3. Click through the wizard (Welcome → License → install location → optional
@@ -164,11 +164,14 @@ workflow. Pull requests are kept fully integrated automatically:
 - One-time setup: Settings → Actions → General → Workflow permissions →
   **Read and write permissions** (so the workflow's `GITHUB_TOKEN` may merge).
 
-Every merge to `main` also rebuilds the Windows installer and refreshes a rolling
-**"latest" pre-release** (`latest-build.yml`), so the download link above always
-serves the newest build. Tagging a release (`git tag v1.1.0 && git push --tags`)
-additionally publishes a pinned, versioned release (`release.yml`), which the
-in-app updater consumes.
+Every merge to `main` auto-publishes a new **versioned GitHub Release marked
+"Latest"** (`latest-build.yml`): it builds the Windows installer, computes the
+next version (`<major.minor from __version__>.<commit count>`, e.g. `1.0.45`),
+stamps it into the app, and attaches the installer under a stable name. So new
+visitors always download the newest build from the link above, the version
+increments automatically, and the in-app updater offers each new build to
+existing users. Bump the major/minor by editing `__version__` in
+`backend/aibench/__init__.py`.
 
 ## Configuration
 

@@ -1,23 +1,21 @@
-name: Latest Windows build
+name: Publish release
 
-# Keeps a single, always-current Windows download available. On every push to
-# main (i.e. whenever a PR merges) this rebuilds the installer and refreshes a
-# rolling "latest" pre-release, so this stable link always serves the newest build:
+# Every merge to main publishes a fresh, auto-versioned GitHub Release that is
+# marked "Latest" — so new visitors always download the newest build, and the
+# version number increments automatically. The in-app updater (which follows
+# the latest non-prerelease) then also offers each new build to existing users.
 #
-#   https://github.com/eachan/AI-Bench/releases/download/latest/AI-Bench-windows-x64.zip
+# Version = <major.minor from backend/aibench/__init__.py>.<commit count>, e.g.
+# 1.0.45. Bumping major/minor is as simple as editing __version__ in the repo.
 #
-# Tagged versioned releases (release.yml) are unaffected; the in-app updater
-# still follows those real versions, not this rolling pre-release.
+# Because the Auto-merge step pushes to main with GITHUB_TOKEN (which does not
+# trigger `push` workflows), this also runs off the Auto-merge workflow's
+# completion.
 
 on:
-  # Runs after an auto-merged PR: the Auto-merge workflow pushes with
-  # GITHUB_TOKEN, and GITHUB_TOKEN pushes do NOT trigger `push` workflows, so we
-  # chain off the Auto-merge workflow's completion (a workflow_run, which is not
-  # suppressed).
   workflow_run:
     workflows: ["Auto-merge"]
     types: [completed]
-  # Covers manual merges / direct pushes to main (triggered by a real user).
   push:
     branches: [main]
   workflow_dispatch:
@@ -26,21 +24,21 @@ permissions:
   contents: write
 
 concurrency:
-  group: latest-build
-  cancel-in-progress: true
+  group: publish-release
+  cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: windows-latest
-    # For workflow_run, only proceed when the Auto-merge actually succeeded.
+  publish:
     if: >
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
     steps:
-      - name: Checkout
+      - name: Checkout main (full history for commit count)
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -52,13 +50,22 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Determine version
+      - name: Compute version
         id: ver
         shell: bash
         run: |
-          v=$(python -c "import sys; sys.path.insert(0,'backend'); import aibench; print(aibench.__version__)")
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          base=$(grep -oE '[0-9]+\.[0-9]+' backend/aibench/__init__.py | head -1)
+          patch=$(git rev-list --count HEAD)
+          version="${base}.${patch}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing v$version"
+
+      - name: Stamp version into the app
+        shell: bash
+        run: |
+          v="${{ steps.ver.outputs.version }}"
+          sed -i "s/^__version__ = .*/__version__ = \"$v\"/" backend/aibench/__init__.py
+          (cd frontend && npm version "$v" --no-git-tag-version --allow-same-version)
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
@@ -71,25 +78,22 @@ jobs:
         run: |
           .\installer\build_installer.ps1 -Version "${{ steps.ver.outputs.version }}"
 
-      - name: Stage stable-named assets
+      - name: Stage stable-named asset
         shell: pwsh
         run: |
           $out = "installer\Output"
-          # Stable, version-independent names so the download link never changes.
+          # A version-independent name so the "latest" download URL never changes.
           Copy-Item "$out\AI-Bench-${{ steps.ver.outputs.version }}-windows-x64.zip" "$out\AI-Bench-windows-x64.zip" -Force
-          Get-ChildItem "$out\AI-Bench-windows-x64.zip","$out\AI-Bench-Setup.exe" | Format-Table Name,Length
 
-      - name: Refresh rolling "latest" pre-release
+      - name: Publish Release (marked Latest)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Latest Windows build
-          prerelease: true
-          body: >
-            Rolling build of the latest `main`
-            (version ${{ steps.ver.outputs.version }}, commit ${{ steps.ver.outputs.short_sha }}).
-            Always the newest build — download AI-Bench-windows-x64.zip, extract, and run
-            AI-Bench-Setup.exe. For stable, pinned versions see the tagged releases.
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: AI-Bench ${{ steps.ver.outputs.version }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
           files: |
-            installer/Output/AI-Bench-windows-x64.zip
             installer/Output/AI-Bench-Setup.exe
+            installer/Output/AI-Bench-windows-x64.zip
+            installer/Output/AI-Bench-${{ steps.ver.outputs.version }}-windows-x64.zip
