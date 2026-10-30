@@ -10,6 +10,7 @@ prereleases, not ``releases/latest``).
 from __future__ import annotations
 
 import platform
+import re
 import shutil
 import tarfile
 import threading
@@ -58,34 +59,81 @@ def resolve_variant(requested: str) -> str:
 # --------------------------------------------------------------------------- #
 # Asset selection (pure, testable)
 # --------------------------------------------------------------------------- #
-def select_llama_asset(assets: list[dict], os_name: str, variant: str = "cpu") -> Optional[dict]:
-    """Pick the llama.cpp binary archive for this OS/variant.
+def _version_key(name: str, kind: str) -> tuple:
+    """Numeric sort key for a versioned build (e.g. ``cuda-12.4`` -> (12, 4))."""
 
-    Matches the real naming, e.g. ``llama-b11982-bin-win-cpu-x64.zip`` /
-    ``llama-b11982-bin-ubuntu-x64.tar.gz`` / ``llama-b11982-bin-macos-x64.tar.gz``.
-    Excludes the ``cudart-*`` runtime-only archives.
+    m = re.search(rf"{kind}-([\d.]+)-", name)
+    return tuple(int(x) for x in m.group(1).split(".")) if m else (0,)
+
+
+def select_llama_asset(assets: list[dict], os_name: str, variant: str = "cpu") -> Optional[dict]:
+    """Pick the llama.cpp binary archive for this OS/variant (x64).
+
+    Matches the real naming, e.g. ``llama-b11986-bin-win-cpu-x64.zip``,
+    ``llama-b11986-bin-win-vulkan-x64.zip``, ``llama-b11986-bin-win-cuda-13.4-x64.zip``,
+    ``llama-b11986-bin-ubuntu-x64.tar.gz``, ``llama-b11986-bin-macos-x64.tar.gz``.
+
+    CUDA/ROCm builds are versioned (``...-cuda-13.4-x64.zip``) and may also ship
+    an arm64 variant, so those are matched with a version-aware regex that pins
+    ``-x64`` and prefers the newest toolkit (needed by recent GPUs). The
+    ``cudart-*`` runtime-only archives are never returned here.
     """
+
+    llama = [(a, (a.get("name") or "")) for a in assets if (a.get("name") or "").startswith("llama-")]
+
+    def first(pred) -> Optional[dict]:
+        return next((a for a, n in llama if pred(n)), None)
+
+    def newest(pattern: str, kind: str) -> Optional[dict]:
+        cands = [(a, n) for a, n in llama if re.search(pattern, n)]
+        if not cands:
+            return None
+        return max(cands, key=lambda c: _version_key(c[1], kind))[0]
 
     if os_name == "windows":
         if variant == "cpu":
-            needles = ["bin-win-cpu-x64.zip"]
-        else:
-            needles = [f"bin-win-{variant}-x64.zip", f"bin-win-{variant}-"]
-    elif os_name == "macos":
-        needles = ["bin-macos-arm64.tar.gz" if platform.machine().lower() in ("arm64", "aarch64")
-                   else "bin-macos-x64.tar.gz", "bin-macos-x64.tar.gz"]
-    else:  # linux
-        if variant == "cpu":
-            needles = ["bin-ubuntu-x64.tar.gz"]
-        else:
-            needles = [f"bin-ubuntu-{variant}-x64.tar.gz", f"bin-ubuntu-{variant}-"]
+            return first(lambda n: "bin-win-cpu-x64.zip" in n)
+        if variant == "cuda":
+            return newest(r"bin-win-cuda-[\d.]+-x64\.zip$", "cuda")
+        if variant == "rocm":
+            return newest(r"bin-win-rocm-[\d.]+-x64\.zip$", "rocm")
+        # vulkan / sycl / others: fixed name.
+        return first(lambda n: f"bin-win-{variant}-x64.zip" in n)
+    if os_name == "macos":
+        arm = platform.machine().lower() in ("arm64", "aarch64")
+        return first(lambda n: ("bin-macos-arm64.tar.gz" if arm else "bin-macos-x64.tar.gz") in n) or \
+            first(lambda n: "bin-macos-x64.tar.gz" in n)
+    # linux
+    if variant == "cpu":
+        return first(lambda n: "bin-ubuntu-x64.tar.gz" in n)
+    if variant == "cuda":
+        return newest(r"bin-ubuntu-cuda-[\d.]+-x64\.tar\.gz$", "cuda")
+    return first(lambda n: f"bin-ubuntu-{variant}-x64.tar.gz" in n) or \
+        first(lambda n: "bin-ubuntu-x64.tar.gz" in n)
 
-    for needle in needles:
-        for a in assets:
-            name = (a.get("name") or "")
-            if name.startswith("llama-") and needle in name:
-                return a
-    return None
+
+def select_cudart_asset(assets: list[dict], os_name: str, cuda_version: str = "") -> Optional[dict]:
+    """Pick the CUDA runtime archive (``cudart-*``) a CUDA llama build needs.
+
+    Prefers the archive whose toolkit version matches the chosen build so the
+    bundled ``cudart`` DLLs line up with llama.cpp's CUDA backend.
+    """
+
+    tail = "x64.zip" if os_name == "windows" else "x64.tar.gz"
+    cudart = [
+        (a, (a.get("name") or ""))
+        for a in assets
+        if (a.get("name") or "").startswith("cudart-") and (a.get("name") or "").endswith(tail)
+    ]
+    plat = "win" if os_name == "windows" else "ubuntu"
+    cudart = [(a, n) for a, n in cudart if plat in n]
+    if not cudart:
+        return None
+    if cuda_version:
+        exact = next((a for a, n in cudart if f"cuda-{cuda_version}-" in n), None)
+        if exact:
+            return exact
+    return max(cudart, key=lambda c: _version_key(c[1], "cuda"))[0]
 
 
 def select_mlperf_asset(assets: list[dict], os_name: str) -> Optional[dict]:
@@ -222,6 +270,23 @@ def _install_llama(state: InstallState, variant: str) -> None:
         installed.chmod(0o755)
     except OSError:
         pass
+
+    # A CUDA build won't run without the CUDA runtime DLLs, which ship in a
+    # separate cudart-* archive on the same release. Pull the matching one so
+    # the GPU build is usable on machines without a CUDA toolkit installed.
+    if variant == "cuda":
+        cuda_ver = ".".join(str(x) for x in _version_key(asset["name"], "cuda")) if "cuda-" in asset["name"] else ""
+        cudart = select_cudart_asset(rel.get("assets") or [], os_name, cuda_ver)
+        if cudart:
+            state.message = f"Downloading CUDA runtime {cudart['name']}…"
+            cudart_archive = tmp / cudart["name"]
+            _download(cudart["browser_download_url"], cudart_archive, state)
+            cudart_dir = tmp / "cudart"
+            _extract(cudart_archive, cudart_dir)
+            lib = next((p.parent for p in cudart_dir.rglob("cudart64_*.dll")), None) or \
+                next((p.parent for p in cudart_dir.rglob("libcudart.so*")), None) or cudart_dir
+            _copy_tree_contents(lib, config.BIN_DIR)
+
     shutil.rmtree(tmp, ignore_errors=True)
     state.status = "done"
     state.percent = 100.0

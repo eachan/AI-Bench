@@ -200,6 +200,7 @@ export default function Tests({
                   <LlamaDevicePicker
                     value={(params.device as string) || ""}
                     onChange={(dev) => setParams((prev) => ({ ...prev, device: dev }))}
+                    onInstalled={onBenchmarksChanged}
                   />
                 </>
               )}
@@ -425,11 +426,22 @@ function LlamaModelPicker({
 function LlamaDevicePicker({
   value,
   onChange,
+  onInstalled,
 }: {
   value: string;
   onChange: (device: string) => void;
+  onInstalled?: () => void;
 }) {
   const [devices, setDevices] = useState<LlamaDevice[] | null>(null);
+  const [variant, setVariant] = useState("vulkan");
+  const [install, setInstall] = useState<InstallStatus | null>(null);
+  const [showBuild, setShowBuild] = useState(false);
+
+  const refresh = () =>
+    api
+      .llamaDevices()
+      .then((r) => setDevices(r.devices))
+      .catch(() => setDevices([]));
 
   useEffect(() => {
     let alive = true;
@@ -441,6 +453,29 @@ function LlamaDevicePicker({
       alive = false;
     };
   }, []);
+
+  const installing = install
+    ? ["resolving", "downloading", "extracting"].includes(install.status)
+    : false;
+
+  const installBuild = async () => {
+    setInstall(await api.installTool("llama-bench", variant));
+    const poll = setInterval(async () => {
+      try {
+        const st = await api.toolStatus();
+        setInstall(st);
+        if (!["resolving", "downloading", "extracting"].includes(st.status)) {
+          clearInterval(poll);
+          if (st.status === "done") {
+            await refresh();
+            onInstalled?.();
+          }
+        }
+      } catch {
+        clearInterval(poll);
+      }
+    }, 1000);
+  };
 
   const hasGpu = (devices ?? []).length > 0;
 
@@ -474,8 +509,82 @@ function LlamaDevicePicker({
               ? `Pinning this run to ${value}; GPU layers are offloaded to it.`
               : hasGpu
               ? `${devices!.length} GPU${devices!.length > 1 ? "s" : ""} detected — pick one to pin the run, or let llama.cpp use all.`
-              : "llama.cpp reports no GPU devices here, so runs use the CPU. If you have a GPU, reinstall the GPU (CUDA/Vulkan) build of llama.cpp from the Tests page."}
+              : "llama.cpp sees no GPU here, so runs use the CPU — the installed build is CPU-only. Install a GPU build below to run on your GPU."}
           </p>
+
+          {!hasGpu && !showBuild && (
+            <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
+              <p className="mb-2">
+                No GPU-accelerated llama.cpp build is installed. Install one to benchmark on your
+                GPU (your other tests already detect it).
+              </p>
+              <button className="btn-primary !py-1.5 !text-xs" onClick={() => setShowBuild(true)}>
+                <Download size={14} />
+                Install GPU build
+              </button>
+            </div>
+          )}
+
+          {(showBuild || hasGpu) && (
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="label !normal-case !tracking-normal text-slate-300">
+                  llama.cpp build
+                </span>
+                {hasGpu && !showBuild && (
+                  <button
+                    className="text-xs text-slate-400 hover:text-slate-200"
+                    onClick={() => setShowBuild(true)}
+                  >
+                    Change build
+                  </button>
+                )}
+              </div>
+              {(showBuild || !hasGpu) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    className="input !w-auto"
+                    value={variant}
+                    onChange={(e) => setVariant(e.target.value)}
+                    disabled={installing}
+                  >
+                    <option value="vulkan">Vulkan — GPU (NVIDIA/AMD/Intel, recommended)</option>
+                    <option value="cuda">CUDA — NVIDIA GPU</option>
+                    <option value="cpu">CPU only</option>
+                  </select>
+                  <button
+                    className="btn-primary !py-1.5 !text-xs"
+                    onClick={installBuild}
+                    disabled={installing}
+                  >
+                    <Download size={14} />
+                    {installing ? "Installing…" : "Install build"}
+                  </button>
+                </div>
+              )}
+              {install && installing && (
+                <div className="mt-2 text-xs text-slate-400">
+                  <div className="mb-1 flex justify-between">
+                    <span>{install.message ?? install.status}</span>
+                    <span>{install.percent.toFixed(0)}%</span>
+                  </div>
+                  <ProgressBar value={install.percent} />
+                </div>
+              )}
+              {install?.status === "done" && (
+                <p className="mt-2 text-xs text-emerald-300">
+                  {install.message ?? "Installed."} Device list refreshed.
+                </p>
+              )}
+              {install?.status === "error" && (
+                <p className="mt-2 text-xs text-rose-300">{install.message}</p>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                Vulkan runs on any modern GPU with no extra runtime; CUDA is NVIDIA-only and also
+                pulls the CUDA runtime. The selected build replaces the current one.
+              </p>
+            </div>
+          )}
         </>
       )}
     </div>
