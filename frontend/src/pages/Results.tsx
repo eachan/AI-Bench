@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Download, Trash2, Upload } from "lucide-react";
-import { api, RunResult } from "../api";
+import { api, Metric, RunResult } from "../api";
 import { Card, Empty, SectionTitle, StatusBadge, Stat } from "../components/ui";
 import { MetricBarChart, SeriesLineChart } from "../components/charts";
 
@@ -100,7 +100,38 @@ export default function Results({
   );
 }
 
+const UNIT_GROUP_NAME: Record<string, string> = {
+  "tok/s": "Throughput",
+  "img/min": "Throughput",
+  "steps/s": "Throughput",
+  s: "Latency",
+  ms: "Latency",
+};
+
+type MetricGroup = { key: string; title: string; direction: string; metrics: Metric[] };
+
+// Group metrics by unit so incompatible scales (e.g. tok/s vs seconds) never
+// share an axis, and label each chart with its direction (higher/lower better).
+function groupMetrics(metrics: Metric[]): MetricGroup[] {
+  const byUnit = new Map<string, Metric[]>();
+  for (const m of metrics) {
+    const key = m.unit || "value";
+    (byUnit.get(key) ?? byUnit.set(key, []).get(key)!).push(m);
+  }
+  return [...byUnit.entries()].map(([unit, ms]) => {
+    const groups = new Set(ms.map((m) => m.group).filter(Boolean));
+    const base =
+      groups.size === 1 ? (ms[0].group as string) : UNIT_GROUP_NAME[unit] ?? "Metrics";
+    const title = unit && unit !== "value" ? `${base} (${unit})` : base;
+    const allUp = ms.every((m) => m.higher_is_better);
+    const allDown = ms.every((m) => !m.higher_is_better);
+    const direction = allUp ? "higher is better" : allDown ? "lower is better" : "";
+    return { key: unit, title, direction, metrics: ms };
+  });
+}
+
 function ResultDetail({ run, onDelete }: { run: RunResult; onDelete: () => void }) {
+  const groups = useMemo(() => groupMetrics(run.metrics), [run.metrics]);
   return (
     <div className="space-y-4">
       <Card>
@@ -126,19 +157,23 @@ function ResultDetail({ run, onDelete }: { run: RunResult; onDelete: () => void 
         )}
 
         {run.metrics.length > 0 && (
-          <>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {run.metrics.map((m) => (
-                <Stat key={m.name} label={m.name} value={m.value} unit={m.unit} />
-              ))}
-            </div>
-            <div className="mt-5">
-              <div className="label mb-2">Metric overview</div>
-              <MetricBarChart metrics={run.metrics} />
-            </div>
-          </>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {run.metrics.map((m) => (
+              <Stat key={m.name} label={m.name} value={m.value} unit={m.unit} />
+            ))}
+          </div>
         )}
       </Card>
+
+      {groups.map((g) => (
+        <Card key={g.key}>
+          <div className="mb-2 flex items-baseline justify-between">
+            <div className="label">{g.title}</div>
+            {g.direction && <span className="text-xs text-slate-500">{g.direction}</span>}
+          </div>
+          <MetricBarChart metrics={g.metrics} />
+        </Card>
+      ))}
 
       {run.series
         .filter((s) => s.points.length > 1)

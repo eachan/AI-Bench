@@ -178,7 +178,7 @@ def test_select_stock_config_is_hardware_aware():
     assert select_stock_config(only_openvino, params, vendors={"nvidia"}) is None
 
 
-def test_parse_mlperf_csv_detects_metrics():
+def test_parse_mlperf_csv_detects_metrics_flat_fallback():
     csv_text = (
         "Scenario,Tokens per second,TTFT (ms),Total latency (ms)\n"
         "Llama3,42.5,180.0,3200.0\n"
@@ -190,3 +190,58 @@ def test_parse_mlperf_csv_detects_metrics():
     ttft = next(m for m in metrics if "TTFT" in m.name)
     assert ttft.higher_is_better is False
     assert ttft.value == 180.0
+
+
+# MLPerf Client's real export is pivoted: metadata rows, then per-category metric
+# rows (label in col 2, one value per result from col 3). Mirrors
+# ExportResultsToCSV in mlcommons/mlperf_client src/CIL/benchmark_logger.cpp.
+MLPERF_PIVOTED_CSV = (
+    "EP,,,NvidiaCUDA\n"
+    "Device,,,GPU\n"
+    "Scenario,,,Llama 2 7B\n"
+    "Date,,,2026-10-30 14:01:59\n"
+    "Tested By MLCommons,,,No\n"
+    "Config Category,,,base\n"
+    "System Info,,,AMD Ryzen 9 9950X3D / RTX 5090\n"
+    "Llama2\n"
+    ",,TTFT (seconds),0.12\n"
+    ",,TPS,73.4\n"
+)
+
+
+def test_parse_mlperf_csv_pivoted_real_format():
+    metrics, notes = parse_mlperf_csv(MLPERF_PIVOTED_CSV)
+    by_name = {m.name: m for m in metrics}
+    assert "TTFT" in by_name and "TPS" in by_name
+    assert not notes  # recognized metrics -> no "nothing found" note
+    ttft, tps = by_name["TTFT"], by_name["TPS"]
+    assert ttft.value == 0.12 and ttft.unit == "s" and ttft.higher_is_better is False
+    assert tps.value == 73.4 and tps.unit == "tok/s" and tps.higher_is_better is True
+    assert {ttft.group, tps.group} == {"Latency", "Throughput"}
+
+
+def test_parse_mlperf_csv_pivoted_image_gen_and_multi_result():
+    csv_text = (
+        "EP,,,NvidiaCUDA,AMDVulkan\n"
+        "Device,,,GPU,GPU\n"
+        "Scenario,,,SDXL,SDXL\n"
+        "Date,,,t,t\n"
+        "Tested By MLCommons,,,No,No\n"
+        "Config Category,,,base,base\n"
+        "System Info,,,x,y\n"
+        "image-gen\n"
+        ",,Images/Min,12.5,9.0\n"
+        ",,Steps/Sec,3.2,2.1\n"
+        ",,Image Size,1024x1024,1024x1024\n"
+    )
+    metrics, _ = parse_mlperf_csv(csv_text)
+    names = sorted(m.name for m in metrics)
+    # Two results -> each metric disambiguated by execution provider; Image Size skipped.
+    assert names == [
+        "Images/Min (AMDVulkan/GPU)",
+        "Images/Min (NvidiaCUDA/GPU)",
+        "Steps/Sec (AMDVulkan/GPU)",
+        "Steps/Sec (NvidiaCUDA/GPU)",
+    ]
+    assert all(m.higher_is_better for m in metrics)
+    assert not any("Image Size" in m.name for m in metrics)

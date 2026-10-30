@@ -173,28 +173,115 @@ def build_mlperf_config(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def parse_mlperf_csv(text: str) -> tuple[list[Metric], list[str]]:
-    """Parse an MLPerf Client results CSV into metrics (schema-tolerant)."""
+def _num(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    m = _FLOAT_RE.search(str(v))
+    return float(m.group()) if m else None
+
+
+# MLPerf Client's pivoted-CSV metadata rows (label in col 0, values from col 3).
+_MLPERF_HEADER_ROWS = {
+    "ep",
+    "device",
+    "scenario",
+    "date",
+    "tested by mlcommons",
+    "config category",
+    "system info",
+}
+# Descriptive (non-performance) rows we skip when parsing metric sections.
+_MLPERF_SKIP_LABELS = {"image size", "inference steps"}
+
+
+def _classify_mlperf_metric(label: str) -> tuple[str, str, bool, str]:
+    """Map an MLPerf metric-row label to (clean name, unit, higher_is_better, group)."""
+
+    low = label.lower()
+    clean = re.sub(r"\s*\((seconds|s)\)\s*$", "", label).strip() or label
+    if "ttft" in low:
+        return "TTFT", "s", False, "Latency"
+    if low == "tps" or "token generation" in low or "tokens/s" in low or "tps" in low:
+        return "TPS", "tok/s", True, "Throughput"
+    if "images/min" in low:
+        return "Images/Min", "img/min", True, "Throughput"
+    if "steps/sec" in low or "steps/s" in low:
+        return "Steps/Sec", "steps/s", True, "Throughput"
+    if any(k in low for k in ("duration", "e2e", "seconds", "first-step", "setup", "warmup", "load")):
+        return clean, "s", False, "Latency"
+    return clean, "", True, "Other"
+
+
+def _header_values(rows: list[list[str]], name: str) -> list[str]:
+    """Return the per-result values (columns 3+) of a pivoted metadata row."""
+
+    for r in rows:
+        if r and r[0].strip().lower() == name:
+            return [c.strip() for c in r[3:]]
+    return []
+
+
+def _parse_mlperf_pivoted(rows: list[list[str]]) -> tuple[list[Metric], list[str]]:
+    """Parse MLPerf Client's real (pivoted) results CSV.
+
+    Layout: seven metadata rows (``EP``/``Device``/``Scenario``/...), each with
+    one column per result from index 3; then per-category sections where a
+    single-cell row names the category and following rows carry a metric label
+    in column 2 and one value per result from column 3 (e.g. ``TTFT (seconds)``,
+    ``TPS``, image-gen ``Images/Min`` ...).
+    """
+
+    eps = _header_values(rows, "ep")
+    devices = _header_values(rows, "device")
+    multi = len(eps) > 1
 
     metrics: list[Metric] = []
-    notes: list[str] = []
+    category = ""
+    for r in rows:
+        if not r:
+            continue
+        c0 = r[0].strip()
+        if c0.lower() in _MLPERF_HEADER_ROWS:
+            continue
+        label = r[2].strip() if len(r) > 2 else ""
+        values = r[3:] if len(r) > 3 else []
+        if c0 and not label and not any(c.strip() for c in values):
+            category = c0  # single-cell category marker
+            continue
+        if not label or label.lower() in _MLPERF_SKIP_LABELS:
+            continue
+        name, unit, hib, group = _classify_mlperf_metric(label)
+        for i, raw in enumerate(values):
+            num = _num(raw)
+            if num is None:
+                continue
+            ep = eps[i] if i < len(eps) else ""
+            dev = devices[i] if i < len(devices) else ""
+            # Keep names concise for the common single-result case; disambiguate
+            # by execution provider only when a run has multiple results.
+            suffix = f" ({ep}{'/' + dev if dev else ''})" if multi and (ep or dev) else ""
+            metrics.append(
+                Metric(
+                    name=f"{name}{suffix}",
+                    value=num,
+                    unit=unit,
+                    higher_is_better=hib,
+                    group=group,
+                )
+            )
+    return metrics, []
+
+
+def _parse_mlperf_flat(text: str) -> tuple[list[Metric], list[str]]:
+    """Fallback parser for a flat (header-row) CSV shape."""
+
+    metrics: list[Metric] = []
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
-        return metrics, notes
-
-    def _num(v: Any) -> Optional[float]:
-        if v is None:
-            return None
-        m = _FLOAT_RE.search(str(v))
-        return float(m.group()) if m else None
-
+        return metrics, []
     for row in reader:
         scenario = (
-            row.get("Scenario")
-            or row.get("scenario")
-            or row.get("Model")
-            or row.get("model")
-            or "MLPerf"
+            row.get("Scenario") or row.get("scenario") or row.get("Model") or row.get("model") or "MLPerf"
         )
         for col, val in row.items():
             if col is None:
@@ -204,31 +291,32 @@ def parse_mlperf_csv(text: str) -> tuple[list[Metric], list[str]]:
             if num is None:
                 continue
             if "tok" in low and ("/s" in low or "per" in low or "throughput" in low):
-                metrics.append(
-                    Metric(name=f"{scenario}: {col}", value=num, unit="tok/s", group="Throughput")
-                )
+                metrics.append(Metric(name=f"{scenario}: {col}", value=num, unit="tok/s", group="Throughput"))
             elif "ttft" in low or "time to first" in low:
-                metrics.append(
-                    Metric(
-                        name=f"{scenario}: TTFT",
-                        value=num,
-                        unit="ms",
-                        higher_is_better=False,
-                        group="Latency",
-                    )
-                )
+                metrics.append(Metric(name=f"{scenario}: TTFT", value=num, unit="ms",
+                                      higher_is_better=False, group="Latency"))
             elif "latency" in low or "duration" in low or "time" in low:
-                metrics.append(
-                    Metric(
-                        name=f"{scenario}: {col}",
-                        value=num,
-                        unit="ms",
-                        higher_is_better=False,
-                        group="Latency",
-                    )
-                )
+                metrics.append(Metric(name=f"{scenario}: {col}", value=num, unit="ms",
+                                      higher_is_better=False, group="Latency"))
+    return metrics, []
+
+
+def parse_mlperf_csv(text: str) -> tuple[list[Metric], list[str]]:
+    """Parse an MLPerf Client results CSV into metrics.
+
+    Handles the tool's real pivoted layout (metrics as rows, results as columns)
+    and falls back to a flat header-row shape for other inputs.
+    """
+
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows:
+        return [], []
+    if rows[0] and rows[0][0].strip().lower() == "ep":
+        metrics, notes = _parse_mlperf_pivoted(rows)
+    else:
+        metrics, notes = _parse_mlperf_flat(text)
     if not metrics:
-        notes.append("No recognizable metric columns found in MLPerf CSV output.")
+        notes = notes + ["No recognizable metric columns found in MLPerf CSV output."]
     return metrics, notes
 
 
